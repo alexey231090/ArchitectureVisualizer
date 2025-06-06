@@ -1,6 +1,7 @@
 .dependency-node {
     background-color: #2d2d2d;
-    border: 1px solid #444;
+    border-width: 1px;
+    border-color: #444;
     border-radius: 5px;
     padding: 10px;
     min-width: 200px;
@@ -10,13 +11,14 @@
 .dependency-node .title {
     color: #fff;
     font-size: 14px;
-    font-weight: bold;
+    -unity-font-style: bold;
     margin-bottom: 10px;
 }
 
 .dependency-node .port {
     background-color: #3d3d3d;
-    border: 1px solid #555;
+    border-width: 1px;
+    border-color: #555;
     border-radius: 3px;
     margin: 2px;
 }
@@ -66,24 +68,37 @@
 
 .grid-background {
     background-color: #1a1a1a;
-    background-size: 20px 20px;
-    background-image: 
-        linear-gradient(to right, #2a2a2a 1px, transparent 1px),
-        linear-gradient(to bottom, #2a2a2a 1px, transparent 1px);
+    background-image: url("data:image/svg+xml,%3Csvg width='20' height='20' viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0h1v20H0V0zm0 0v1h20V0H0z' fill='%232a2a2a' fill-opacity='1' fill-rule='evenodd'/%3E%3C/svg%3E");
+}
+
+.grid-background::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: transparent;
+    border-width: 0;
+    border-color: #2a2a2a;
+    border-style: solid;
+    border-right-width: 1px;
+    border-bottom-width: 1px;
+    pointer-events: none;
 }
 
 /* Стили для соединений */
 .edge {
-    stroke: #666;
-    stroke-width: 2;
+    border-color: #666;
+    border-width: 2px;
 }
 
 .edge:hover {
-    stroke: #888;
-    stroke-width: 3;
+    border-color: #888;
+    border-width: 3px;
 }
 
 .edge.selected {
-    stroke: #4a8a4a;
-    stroke-width: 3;
+    border-color: #4a8a4a;
+    border-width: 3px;
 } 
