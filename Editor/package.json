@@ -1,0 +1,24 @@
+{
+    "name": "com.alexey231090.architecturevisualizer",
+    "version": "1.0.0",
+    "displayName": "Architecture Visualizer",
+    "description": "Плагин для визуализации и анализа зависимостей между скриптами в Unity проекте",
+    "unity": "2020.3",
+    "keywords": [
+        "architecture",
+        "dependencies",
+        "visualization",
+        "analysis"
+    ],
+    "author": {
+        "name": "Alexey231090",
+        "email": "your.email@example.com",
+        "url": "https://github.com/alexey231090"
+    },
+    "dependencies": {
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/alexey231090/ArchitectureVisualizer.git"
+    }
+} 
