@@ -4,6 +4,8 @@
     "displayName": "Architecture Visualizer",
     "description": "Плагин для визуализации и анализа зависимостей между скриптами в Unity проекте",
     "unity": "2020.3",
+    "unityRelease": "0f1",
+    "type": "tool",
     "keywords": [
         "architecture",
         "dependencies",
@@ -20,5 +22,21 @@
     "repository": {
         "type": "git",
         "url": "https://github.com/alexey231090/ArchitectureVisualizer.git"
+    },
+    "samples": [
+        {
+            "displayName": "Basic Example",
+            "description": "Basic example of using Architecture Visualizer",
+            "path": "Samples~/BasicExample"
+        }
+    ],
+    "changelogUrl": "https://github.com/alexey231090/ArchitectureVisualizer/blob/main/CHANGELOG.md",
+    "documentationUrl": "https://github.com/alexey231090/ArchitectureVisualizer/blob/main/README.md",
+    "licensesUrl": "https://github.com/alexey231090/ArchitectureVisualizer/blob/main/LICENSE.md",
+    "upmCi": {
+        "github": {
+            "repository": "alexey231090/ArchitectureVisualizer",
+            "workflowPath": ".github/workflows/upm-ci.yml"
+        }
     }
 } 

@@ -14,17 +14,18 @@
 ```
 Assets/
 └── Editor/
-    ├── ArchitectureVisualizerWindow.cs
-    ├── DependencyGraphView.cs
-    ├── ScriptAnalyzer.cs
-    ├── DependencyData.cs
-    ├── TabView.cs
-    ├── package.json
-    ├── README.md
+    ├── ArchitectureVisualizer/
+    │   ├── Core/           # Основные компоненты плагина
+    │   ├── Modules/        # Модули плагина
+    │   └── Resources/      # Ресурсы модулей
+    ├── Resources/          # Общие ресурсы
+    ├── Plugins/           # Внешние плагины
+    ├── Packages/          # Зависимости
+    ├── README.md          # Документация
+    ├── TECHNICAL.md       # Техническая документация
+    ├── PROGRESS.md        # Отслеживание прогресса
     ├── .gitignore
-    ├── Resources/
-    │   └── styles.uss
-    └── Plugins/
+    └── package.json
 ```
 
 ## Использование
