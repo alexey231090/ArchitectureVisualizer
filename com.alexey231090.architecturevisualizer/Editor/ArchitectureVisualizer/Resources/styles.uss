@@ -4,15 +4,12 @@
     border-color: #444;
     border-radius: 5px;
     padding: 10px;
-    min-width: 200px;
-    min-height: 100px;
 }
 
 .dependency-node .title {
     color: #fff;
     font-size: 14px;
     -unity-font-style: bold;
-    margin-bottom: 10px;
 }
 
 .dependency-node .port {

@@ -2,7 +2,6 @@ using UnityEngine;
 using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine.UIElements;
-using UnityEditor.Experimental.GraphView;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
@@ -11,27 +10,61 @@ namespace ArchitectureVisualizer
 {
     public class ArchitectureVisualizerWindow : EditorWindow
     {
-        private DependencyGraphView graph;
         private VisualElement tableContainer;
         private TabView tabView;
         private VisualElement structureContainer;
         private ScrollView tablesContainer;
         private DependencyData dependencyData = new DependencyData();
+        private string selectedFolder = "Assets"; // По умолчанию анализируем всю папку Assets
+
+        private void OnEnable()
+        {
+            Debug.Log("ArchitectureVisualizerWindow: OnEnable");
+            CreateGUI();
+        }
 
         [MenuItem("Tools/Architecture Visualizer")]
         public static void ShowWindow()
         {
-            var window = GetWindow<ArchitectureVisualizerWindow>();
-            window.titleContent = new GUIContent("Architecture Visualizer");
+            Debug.Log("Opening Architecture Visualizer window...");
+            var window = GetWindow<ArchitectureVisualizerWindow>("Architecture Visualizer");
+            window.minSize = new Vector2(800, 600);
+            window.Show();
+            window.Focus();
+            Debug.Log("Window created successfully");
         }
 
         private void CreateGUI()
         {
+            Debug.Log("Creating GUI...");
+            
+            // Очищаем существующие элементы
+            rootVisualElement.Clear();
+
             // Создаем контейнер для кнопок
             var buttonContainer = new VisualElement();
             buttonContainer.style.flexDirection = FlexDirection.Row;
             buttonContainer.style.marginBottom = 10;
+            buttonContainer.style.paddingTop = 10;
+            buttonContainer.style.paddingRight = 10;
+            buttonContainer.style.paddingBottom = 10;
+            buttonContainer.style.paddingLeft = 10;
             rootVisualElement.Add(buttonContainer);
+
+            // Кнопка для выбора папки
+            var selectFolderButton = new Button(() => SelectFolder())
+            {
+                text = "Select Folder",
+                style = { marginRight = 10 }
+            };
+            selectFolderButton.style.backgroundColor = new Color(0.3f, 0.4f, 0.5f);
+            selectFolderButton.style.color = Color.white;
+            buttonContainer.Add(selectFolderButton);
+
+            // Метка с текущей выбранной папкой
+            var folderLabel = new Label($"Current folder: {selectedFolder}");
+            folderLabel.style.marginRight = 10;
+            buttonContainer.Add(folderLabel);
 
             // Кнопка для анализа
             var analyzeButton = new Button(() => AnalyzeProject())
@@ -39,20 +72,18 @@ namespace ArchitectureVisualizer
                 text = "Analyze Project",
                 style = { marginRight = 10 }
             };
-            analyzeButton.style.backgroundColor = new Color(0.4f, 0.5f, 0.3f); // Цвет хаки
-            analyzeButton.style.color = Color.white; // Белый текст для лучшей читаемости
+            analyzeButton.style.backgroundColor = new Color(0.4f, 0.5f, 0.3f);
+            analyzeButton.style.color = Color.white;
             buttonContainer.Add(analyzeButton);
 
-            // Кнопка для центрирования
-            var centerButton = new Button(() => CenterGraph())
-            {
-                text = "Center Graph"
-            };
-            buttonContainer.Add(centerButton);
-
+            Debug.Log("Creating TabView...");
             // Создаем TabView
             tabView = new TabView();
             tabView.style.flexGrow = 1;
+            tabView.style.marginTop = 10;
+            tabView.style.marginRight = 10;
+            tabView.style.marginBottom = 10;
+            tabView.style.marginLeft = 10;
             rootVisualElement.Add(tabView);
 
             // Добавляем вкладку для таблиц (первая)
@@ -62,26 +93,50 @@ namespace ArchitectureVisualizer
             tablesTab.SetContent(tablesContainer);
             tabView.AddTab(tablesTab);
 
-            // Добавляем вкладку для графа (вторая)
-            var graphTab = new Tab("Graph");
-            graph = new DependencyGraphView();
-            graph.style.flexGrow = 1;
-            graphTab.SetContent(graph);
-            tabView.AddTab(graphTab);
-
-            // Добавляем вкладку для структуры (третья)
+            // Добавляем вкладку для структуры (вторая)
             var structureTab = new Tab("Structure");
             structureContainer = new ScrollView();
             structureContainer.style.flexGrow = 1;
             structureTab.SetContent(structureContainer);
             tabView.AddTab(structureTab);
 
-            // Отключаем взаимодействие с мышью для фоновой сетки
-            var gridBackground = rootVisualElement.Q("grid-background");
-            if (gridBackground != null)
+            // Принудительно обновляем окно
+            rootVisualElement.MarkDirtyRepaint();
+            Debug.Log("GUI creation completed");
+        }
+
+        private void SelectFolder()
+        {
+            string path = EditorUtility.OpenFolderPanel("Select Folder to Analyze", "Assets", "");
+            if (!string.IsNullOrEmpty(path))
             {
-                gridBackground.pickingMode = PickingMode.Ignore;
+                // Преобразуем абсолютный путь в путь относительно проекта
+                string projectPath = Application.dataPath;
+                if (path.StartsWith(projectPath))
+                {
+                    selectedFolder = "Assets" + path.Substring(projectPath.Length);
+                }
+                else
+                {
+                    EditorUtility.DisplayDialog("Invalid Folder", "Please select a folder within your Unity project.", "OK");
+                    return;
+                }
+
+                // Обновляем метку с текущей папкой
+                var folderLabel = rootVisualElement.Q<Label>();
+                if (folderLabel != null)
+                {
+                    folderLabel.text = $"Current folder: {selectedFolder}";
+                }
             }
+        }
+
+        private void AnalyzeProject()
+        {
+            Debug.Log("Starting project analysis...");
+            UpdateTables();
+            UpdateStructure();
+            Debug.Log("Project analysis completed");
         }
 
         private void UpdateTables()
@@ -103,8 +158,8 @@ namespace ArchitectureVisualizer
             // Очищаем предыдущие данные
             dependencyData = new DependencyData();
 
-            // Получаем все скрипты
-            string[] scriptGuids = AssetDatabase.FindAssets("t:Script", new[] { "Assets" });
+            // Получаем все скрипты в выбранной папке
+            string[] scriptGuids = AssetDatabase.FindAssets("t:Script", new[] { selectedFolder });
             foreach (var guid in scriptGuids)
             {
                 string path = AssetDatabase.GUIDToAssetPath(guid);
@@ -158,7 +213,8 @@ namespace ArchitectureVisualizer
                     {
                         SOObject = field.FieldType.Name,
                         User = type.Name,
-                        MethodOrProperty = field.Name
+                        MethodOrProperty = field.Name,
+                        Notes = "Поле типа ScriptableObject"
                     });
                 }
             }
@@ -176,6 +232,45 @@ namespace ArchitectureVisualizer
                         User = "Неизвестно",
                         AccessMethod = "Instance",
                         Problems = "Глобальное состояние"
+                    });
+                }
+            }
+
+            // Анализ интерфейсов для DI
+            var interfaces = type.GetInterfaces();
+            foreach (var iface in interfaces)
+            {
+                dependencyData.Dependencies.Add(new DependencyData.DIData
+                {
+                    Class = type.Name,
+                    Interface = iface.Name,
+                    InjectionMethod = "Constructor/Field",
+                    Notes = "Реализация интерфейса"
+                });
+            }
+
+            // Анализ сообщений
+            var methods = type.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            foreach (var method in methods)
+            {
+                if (method.Name.Contains("Send") || method.Name.Contains("Publish"))
+                {
+                    dependencyData.Messages.Add(new DependencyData.MessageData
+                    {
+                        Sender = type.Name,
+                        Receiver = "Неизвестно",
+                        MessageType = method.Name,
+                        Notes = "Отправка сообщения"
+                    });
+                }
+                else if (method.Name.Contains("Receive") || method.Name.Contains("Subscribe"))
+                {
+                    dependencyData.Messages.Add(new DependencyData.MessageData
+                    {
+                        Sender = "Неизвестно",
+                        Receiver = type.Name,
+                        MessageType = method.Name,
+                        Notes = "Получение сообщения"
                     });
                 }
             }
@@ -204,6 +299,8 @@ namespace ArchitectureVisualizer
             table.style.borderRightColor = new Color(0.3f, 0.3f, 0.3f);
             table.style.borderTopColor = new Color(0.3f, 0.3f, 0.3f);
             table.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
+            table.style.width = new Length(100, LengthUnit.Percent);
+            table.style.minWidth = 800; // Минимальная ширина таблицы
 
             // Заголовки столбцов
             var headerRow = new VisualElement();
@@ -213,17 +310,23 @@ namespace ArchitectureVisualizer
             headerRow.style.paddingRight = 5;
             headerRow.style.paddingBottom = 5;
             headerRow.style.paddingLeft = 5;
+            headerRow.style.width = new Length(100, LengthUnit.Percent);
 
             string[] headers = { "Генератор", "Подписчик", "Метод подписчика", "Описание" };
-            foreach (var headerText in headers)
+            float[] columnWidths = { 20, 20, 20, 40 }; // Процентные значения ширины колонок
+            foreach (var i in Enumerable.Range(0, headers.Length))
             {
-                var headerCell = new Label(headerText);
-                headerCell.style.flexGrow = 1;
+                var headerCell = new Label(headers[i]);
+                headerCell.style.width = new Length(columnWidths[i], LengthUnit.Percent);
+                headerCell.style.minWidth = 150; // Минимальная ширина ячейки
                 headerCell.style.unityFontStyleAndWeight = FontStyle.Bold;
                 headerCell.style.paddingTop = 5;
                 headerCell.style.paddingRight = 5;
                 headerCell.style.paddingBottom = 5;
                 headerCell.style.paddingLeft = 5;
+                headerCell.style.whiteSpace = WhiteSpace.Normal;
+                headerCell.style.overflow = Overflow.Hidden;
+                headerCell.style.textOverflow = TextOverflow.Ellipsis;
                 headerRow.Add(headerCell);
             }
             table.Add(headerRow);
@@ -239,11 +342,13 @@ namespace ArchitectureVisualizer
                 row.style.paddingLeft = 5;
                 row.style.borderBottomWidth = 1;
                 row.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
+                row.style.width = new Length(100, LengthUnit.Percent);
 
-                AddCell(row, evt.Generator);
-                AddCell(row, evt.Subscriber);
-                AddCell(row, evt.SubscriberMethod);
-                AddCell(row, evt.Description);
+                // Добавляем ячейки с фиксированной шириной
+                AddCell(row, evt.Generator, columnWidths[0]);
+                AddCell(row, evt.Subscriber, columnWidths[1]);
+                AddCell(row, evt.SubscriberMethod, columnWidths[2]);
+                AddCell(row, evt.Description, columnWidths[3]);
 
                 table.Add(row);
             }
@@ -259,7 +364,7 @@ namespace ArchitectureVisualizer
             container.style.marginBottom = 20;
 
             // Заголовок
-            var header = new Label("2. Таблица для жёстких зависимостей (GetComponent / public поля)");
+            var header = new Label("2. Таблица для жёстких зависимостей (GetComponent, FindObjectOfType)");
             header.style.unityFontStyleAndWeight = FontStyle.Bold;
             header.style.fontSize = 16;
             header.style.marginBottom = 10;
@@ -276,6 +381,8 @@ namespace ArchitectureVisualizer
             table.style.borderRightColor = new Color(0.3f, 0.3f, 0.3f);
             table.style.borderTopColor = new Color(0.3f, 0.3f, 0.3f);
             table.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
+            table.style.width = new Length(100, LengthUnit.Percent);
+            table.style.minWidth = 800;
 
             // Заголовки столбцов
             var headerRow = new VisualElement();
@@ -285,97 +392,48 @@ namespace ArchitectureVisualizer
             headerRow.style.paddingRight = 5;
             headerRow.style.paddingBottom = 5;
             headerRow.style.paddingLeft = 5;
+            headerRow.style.width = new Length(100, LengthUnit.Percent);
 
-            string[] headers = { "Класс-потребитель", "Зависимость", "Как получает" };
-            foreach (var headerText in headers)
+            string[] headers = { "Потребитель", "Зависимость", "Метод доступа", "Риски" };
+            float[] columnWidths = { 25, 25, 25, 25 }; // Равномерное распределение
+            foreach (var i in Enumerable.Range(0, headers.Length))
             {
-                var headerCell = new Button(() => SortTable(table, headerText))
-                {
-                    text = headerText
-                };
-                headerCell.style.flexGrow = 1;
+                var headerCell = new Label(headers[i]);
+                headerCell.style.width = new Length(columnWidths[i], LengthUnit.Percent);
+                headerCell.style.minWidth = 150;
                 headerCell.style.unityFontStyleAndWeight = FontStyle.Bold;
                 headerCell.style.paddingTop = 5;
                 headerCell.style.paddingRight = 5;
                 headerCell.style.paddingBottom = 5;
                 headerCell.style.paddingLeft = 5;
-                headerCell.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f);
-                headerCell.style.borderBottomWidth = 0;
-                headerCell.style.borderTopWidth = 0;
-                headerCell.style.borderLeftWidth = 0;
-                headerCell.style.borderRightWidth = 0;
+                headerCell.style.whiteSpace = WhiteSpace.Normal;
+                headerCell.style.overflow = Overflow.Hidden;
+                headerCell.style.textOverflow = TextOverflow.Ellipsis;
                 headerRow.Add(headerCell);
             }
             table.Add(headerRow);
 
-            // Группируем зависимости по классам-потребителям
-            var groupedDependencies = dependencyData.HardDependencies
-                .GroupBy(d => d.Consumer)
-                .OrderBy(g => g.Key);
-
-            foreach (var group in groupedDependencies)
+            // Добавляем строки с данными
+            foreach (var dep in dependencyData.HardDependencies)
             {
-                // Создаем заголовок группы
-                var groupHeader = new VisualElement();
-                groupHeader.style.flexDirection = FlexDirection.Row;
-                groupHeader.style.backgroundColor = new Color(0.25f, 0.25f, 0.25f);
-                groupHeader.style.paddingTop = 5;
-                groupHeader.style.paddingRight = 5;
-                groupHeader.style.paddingBottom = 5;
-                groupHeader.style.paddingLeft = 5;
-                groupHeader.style.borderBottomWidth = 1;
-                groupHeader.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
+                var row = new VisualElement();
+                row.style.flexDirection = FlexDirection.Row;
+                row.style.paddingTop = 5;
+                row.style.paddingRight = 5;
+                row.style.paddingBottom = 5;
+                row.style.paddingLeft = 5;
+                row.style.borderBottomWidth = 1;
+                row.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
+                row.style.width = new Length(100, LengthUnit.Percent);
 
-                // Кнопка сворачивания/разворачивания
-                var toggleButton = new Button(() => ToggleGroup(groupHeader))
-                {
-                    text = "▼"
-                };
-                toggleButton.style.width = 20;
-                toggleButton.style.marginRight = 5;
-                toggleButton.style.backgroundColor = new Color(0.25f, 0.25f, 0.25f);
-                toggleButton.style.borderBottomWidth = 0;
-                toggleButton.style.borderTopWidth = 0;
-                toggleButton.style.borderLeftWidth = 0;
-                toggleButton.style.borderRightWidth = 0;
-                groupHeader.Add(toggleButton);
+                AddCell(row, dep.Consumer, columnWidths[0]);
+                AddCell(row, dep.Dependency, columnWidths[1]);
+                AddCell(row, dep.AccessMethod, columnWidths[2]);
+                AddCell(row, dep.Risks, columnWidths[3]);
 
-                // Название группы
-                var groupLabel = new Label($"{group.Key} ({group.Count()} зависимостей)");
-                groupLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-                groupLabel.style.flexGrow = 1;
-                groupHeader.Add(groupLabel);
-
-                table.Add(groupHeader);
-
-                // Контейнер для строк группы
-                var groupContainer = new VisualElement();
-                groupContainer.style.flexDirection = FlexDirection.Column;
-                groupContainer.name = "GroupContainer";
-
-                // Добавляем строки группы
-                foreach (var dep in group.OrderBy(d => d.Dependency))
-                {
-                    var row = new VisualElement();
-                    row.style.flexDirection = FlexDirection.Row;
-                    row.style.paddingTop = 5;
-                    row.style.paddingRight = 5;
-                    row.style.paddingBottom = 5;
-                    row.style.paddingLeft = 5;
-                    row.style.borderBottomWidth = 1;
-                    row.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
-
-                    AddCell(row, dep.Consumer);
-                    AddCell(row, dep.Dependency);
-                    AddCell(row, dep.AccessMethod);
-
-                    groupContainer.Add(row);
-                }
-
-                table.Add(groupContainer);
+                table.Add(row);
             }
 
-            // Добавляем таблицу в контейнер
             container.Add(table);
             tablesContainer.Add(container);
         }
@@ -438,16 +496,18 @@ namespace ArchitectureVisualizer
             }
         }
 
-        private void AddCell(VisualElement row, string text)
+        private void AddCell(VisualElement row, string text, float widthPercent)
         {
             var cell = new Label(text);
-            cell.style.flexGrow = 1;
+            cell.style.width = new Length(widthPercent, LengthUnit.Percent);
+            cell.style.minWidth = 150;
             cell.style.paddingTop = 5;
             cell.style.paddingRight = 5;
             cell.style.paddingBottom = 5;
             cell.style.paddingLeft = 5;
-            cell.style.borderRightWidth = 1;
-            cell.style.borderRightColor = new Color(0.3f, 0.3f, 0.3f);
+            cell.style.whiteSpace = WhiteSpace.Normal;
+            cell.style.overflow = Overflow.Hidden;
+            cell.style.textOverflow = TextOverflow.Ellipsis;
             row.Add(cell);
         }
 
@@ -457,7 +517,7 @@ namespace ArchitectureVisualizer
             container.style.marginBottom = 20;
 
             // Заголовок
-            var header = new Label("3. Таблица для DI (внедрение зависимостей)");
+            var header = new Label("3. Таблица для внедрения зависимостей (DI)");
             header.style.unityFontStyleAndWeight = FontStyle.Bold;
             header.style.fontSize = 16;
             header.style.marginBottom = 10;
@@ -474,6 +534,8 @@ namespace ArchitectureVisualizer
             table.style.borderRightColor = new Color(0.3f, 0.3f, 0.3f);
             table.style.borderTopColor = new Color(0.3f, 0.3f, 0.3f);
             table.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
+            table.style.width = new Length(100, LengthUnit.Percent);
+            table.style.minWidth = 800;
 
             // Заголовки столбцов
             var headerRow = new VisualElement();
@@ -483,23 +545,29 @@ namespace ArchitectureVisualizer
             headerRow.style.paddingRight = 5;
             headerRow.style.paddingBottom = 5;
             headerRow.style.paddingLeft = 5;
+            headerRow.style.width = new Length(100, LengthUnit.Percent);
 
-            string[] headers = { "Класс", "Зависимость", "Способ внедрения" };
-            foreach (var headerText in headers)
+            string[] headers = { "Класс", "Интерфейс", "Метод внедрения", "Примечания" };
+            float[] columnWidths = { 25, 25, 25, 25 }; // Равномерное распределение
+            foreach (var i in Enumerable.Range(0, headers.Length))
             {
-                var headerCell = new Label(headerText);
-                headerCell.style.flexGrow = 1;
+                var headerCell = new Label(headers[i]);
+                headerCell.style.width = new Length(columnWidths[i], LengthUnit.Percent);
+                headerCell.style.minWidth = 150;
                 headerCell.style.unityFontStyleAndWeight = FontStyle.Bold;
                 headerCell.style.paddingTop = 5;
                 headerCell.style.paddingRight = 5;
                 headerCell.style.paddingBottom = 5;
                 headerCell.style.paddingLeft = 5;
+                headerCell.style.whiteSpace = WhiteSpace.Normal;
+                headerCell.style.overflow = Overflow.Hidden;
+                headerCell.style.textOverflow = TextOverflow.Ellipsis;
                 headerRow.Add(headerCell);
             }
             table.Add(headerRow);
 
             // Добавляем строки с данными
-            foreach (var dep in dependencyData.Dependencies)
+            foreach (var di in dependencyData.Dependencies)
             {
                 var row = new VisualElement();
                 row.style.flexDirection = FlexDirection.Row;
@@ -509,15 +577,16 @@ namespace ArchitectureVisualizer
                 row.style.paddingLeft = 5;
                 row.style.borderBottomWidth = 1;
                 row.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
+                row.style.width = new Length(100, LengthUnit.Percent);
 
-                AddCell(row, dep.Class);
-                AddCell(row, dep.Dependency);
-                AddCell(row, dep.InjectionMethod);
+                AddCell(row, di.Class, columnWidths[0]);
+                AddCell(row, di.Interface, columnWidths[1]);
+                AddCell(row, di.InjectionMethod, columnWidths[2]);
+                AddCell(row, di.Notes, columnWidths[3]);
 
                 table.Add(row);
             }
 
-            // Добавляем таблицу в контейнер
             container.Add(table);
             tablesContainer.Add(container);
         }
@@ -545,6 +614,8 @@ namespace ArchitectureVisualizer
             table.style.borderRightColor = new Color(0.3f, 0.3f, 0.3f);
             table.style.borderTopColor = new Color(0.3f, 0.3f, 0.3f);
             table.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
+            table.style.width = new Length(100, LengthUnit.Percent);
+            table.style.minWidth = 800;
 
             // Заголовки столбцов
             var headerRow = new VisualElement();
@@ -554,17 +625,23 @@ namespace ArchitectureVisualizer
             headerRow.style.paddingRight = 5;
             headerRow.style.paddingBottom = 5;
             headerRow.style.paddingLeft = 5;
+            headerRow.style.width = new Length(100, LengthUnit.Percent);
 
-            string[] headers = { "SO-Объект", "Кто использует", "Метод/свойство" };
-            foreach (var headerText in headers)
+            string[] headers = { "ScriptableObject", "Использование", "Метод/Свойство", "Примечания" };
+            float[] columnWidths = { 25, 25, 25, 25 }; // Равномерное распределение
+            foreach (var i in Enumerable.Range(0, headers.Length))
             {
-                var headerCell = new Label(headerText);
-                headerCell.style.flexGrow = 1;
+                var headerCell = new Label(headers[i]);
+                headerCell.style.width = new Length(columnWidths[i], LengthUnit.Percent);
+                headerCell.style.minWidth = 150;
                 headerCell.style.unityFontStyleAndWeight = FontStyle.Bold;
                 headerCell.style.paddingTop = 5;
                 headerCell.style.paddingRight = 5;
                 headerCell.style.paddingBottom = 5;
                 headerCell.style.paddingLeft = 5;
+                headerCell.style.whiteSpace = WhiteSpace.Normal;
+                headerCell.style.overflow = Overflow.Hidden;
+                headerCell.style.textOverflow = TextOverflow.Ellipsis;
                 headerRow.Add(headerCell);
             }
             table.Add(headerRow);
@@ -580,15 +657,16 @@ namespace ArchitectureVisualizer
                 row.style.paddingLeft = 5;
                 row.style.borderBottomWidth = 1;
                 row.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
+                row.style.width = new Length(100, LengthUnit.Percent);
 
-                AddCell(row, so.SOObject);
-                AddCell(row, so.User);
-                AddCell(row, so.MethodOrProperty);
+                AddCell(row, so.SOObject, columnWidths[0]);
+                AddCell(row, so.User, columnWidths[1]);
+                AddCell(row, so.MethodOrProperty, columnWidths[2]);
+                AddCell(row, so.Notes, columnWidths[3]);
 
                 table.Add(row);
             }
 
-            // Добавляем таблицу в контейнер
             container.Add(table);
             tablesContainer.Add(container);
         }
@@ -616,6 +694,8 @@ namespace ArchitectureVisualizer
             table.style.borderRightColor = new Color(0.3f, 0.3f, 0.3f);
             table.style.borderTopColor = new Color(0.3f, 0.3f, 0.3f);
             table.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
+            table.style.width = new Length(100, LengthUnit.Percent);
+            table.style.minWidth = 800;
 
             // Заголовки столбцов
             var headerRow = new VisualElement();
@@ -625,17 +705,23 @@ namespace ArchitectureVisualizer
             headerRow.style.paddingRight = 5;
             headerRow.style.paddingBottom = 5;
             headerRow.style.paddingLeft = 5;
+            headerRow.style.width = new Length(100, LengthUnit.Percent);
 
-            string[] headers = { "Singleton-класс", "Кто использует", "Как обращается", "Проблемы" };
-            foreach (var headerText in headers)
+            string[] headers = { "Singleton", "Использование", "Метод доступа", "Проблемы" };
+            float[] columnWidths = { 25, 25, 25, 25 }; // Равномерное распределение
+            foreach (var i in Enumerable.Range(0, headers.Length))
             {
-                var headerCell = new Label(headerText);
-                headerCell.style.flexGrow = 1;
+                var headerCell = new Label(headers[i]);
+                headerCell.style.width = new Length(columnWidths[i], LengthUnit.Percent);
+                headerCell.style.minWidth = 150;
                 headerCell.style.unityFontStyleAndWeight = FontStyle.Bold;
                 headerCell.style.paddingTop = 5;
                 headerCell.style.paddingRight = 5;
                 headerCell.style.paddingBottom = 5;
                 headerCell.style.paddingLeft = 5;
+                headerCell.style.whiteSpace = WhiteSpace.Normal;
+                headerCell.style.overflow = Overflow.Hidden;
+                headerCell.style.textOverflow = TextOverflow.Ellipsis;
                 headerRow.Add(headerCell);
             }
             table.Add(headerRow);
@@ -651,16 +737,16 @@ namespace ArchitectureVisualizer
                 row.style.paddingLeft = 5;
                 row.style.borderBottomWidth = 1;
                 row.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
+                row.style.width = new Length(100, LengthUnit.Percent);
 
-                AddCell(row, singleton.SingletonClass);
-                AddCell(row, singleton.User);
-                AddCell(row, singleton.AccessMethod);
-                AddCell(row, singleton.Problems);
+                AddCell(row, singleton.SingletonClass, columnWidths[0]);
+                AddCell(row, singleton.User, columnWidths[1]);
+                AddCell(row, singleton.AccessMethod, columnWidths[2]);
+                AddCell(row, singleton.Problems, columnWidths[3]);
 
                 table.Add(row);
             }
 
-            // Добавляем таблицу в контейнер
             container.Add(table);
             tablesContainer.Add(container);
         }
@@ -671,7 +757,7 @@ namespace ArchitectureVisualizer
             container.style.marginBottom = 20;
 
             // Заголовок
-            var header = new Label("6. Таблица для Message Bus / Signal Bus");
+            var header = new Label("6. Таблица для MessageBus");
             header.style.unityFontStyleAndWeight = FontStyle.Bold;
             header.style.fontSize = 16;
             header.style.marginBottom = 10;
@@ -688,6 +774,8 @@ namespace ArchitectureVisualizer
             table.style.borderRightColor = new Color(0.3f, 0.3f, 0.3f);
             table.style.borderTopColor = new Color(0.3f, 0.3f, 0.3f);
             table.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
+            table.style.width = new Length(100, LengthUnit.Percent);
+            table.style.minWidth = 800;
 
             // Заголовки столбцов
             var headerRow = new VisualElement();
@@ -697,23 +785,29 @@ namespace ArchitectureVisualizer
             headerRow.style.paddingRight = 5;
             headerRow.style.paddingBottom = 5;
             headerRow.style.paddingLeft = 5;
+            headerRow.style.width = new Length(100, LengthUnit.Percent);
 
-            string[] headers = { "Сигнал", "Кто отправляет", "Кто принимает", "Метод обработки" };
-            foreach (var headerText in headers)
+            string[] headers = { "Отправитель", "Получатель", "Тип сообщения", "Примечания" };
+            float[] columnWidths = { 25, 25, 25, 25 }; // Равномерное распределение
+            foreach (var i in Enumerable.Range(0, headers.Length))
             {
-                var headerCell = new Label(headerText);
-                headerCell.style.flexGrow = 1;
+                var headerCell = new Label(headers[i]);
+                headerCell.style.width = new Length(columnWidths[i], LengthUnit.Percent);
+                headerCell.style.minWidth = 150;
                 headerCell.style.unityFontStyleAndWeight = FontStyle.Bold;
                 headerCell.style.paddingTop = 5;
                 headerCell.style.paddingRight = 5;
                 headerCell.style.paddingBottom = 5;
                 headerCell.style.paddingLeft = 5;
+                headerCell.style.whiteSpace = WhiteSpace.Normal;
+                headerCell.style.overflow = Overflow.Hidden;
+                headerCell.style.textOverflow = TextOverflow.Ellipsis;
                 headerRow.Add(headerCell);
             }
             table.Add(headerRow);
 
             // Добавляем строки с данными
-            foreach (var msg in dependencyData.MessageBus)
+            foreach (var message in dependencyData.Messages)
             {
                 var row = new VisualElement();
                 row.style.flexDirection = FlexDirection.Row;
@@ -723,128 +817,83 @@ namespace ArchitectureVisualizer
                 row.style.paddingLeft = 5;
                 row.style.borderBottomWidth = 1;
                 row.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
+                row.style.width = new Length(100, LengthUnit.Percent);
 
-                AddCell(row, msg.Signal);
-                AddCell(row, msg.Sender);
-                AddCell(row, msg.Receiver);
-                AddCell(row, msg.HandlerMethod);
+                AddCell(row, message.Sender, columnWidths[0]);
+                AddCell(row, message.Receiver, columnWidths[1]);
+                AddCell(row, message.MessageType, columnWidths[2]);
+                AddCell(row, message.Notes, columnWidths[3]);
 
                 table.Add(row);
             }
 
-            // Добавляем таблицу в контейнер
             container.Add(table);
             tablesContainer.Add(container);
-        }
-
-        private void AnalyzeProject()
-        {
-            if (graph == null)
-            {
-                Debug.LogError("Graph is null!");
-                return;
-            }
-
-            graph.ClearGraph(); // Очищаем предыдущий граф
-            ScriptAnalyzer.AnalyzeScripts(graph);
-            UpdateStructure(); // Обновляем структуру
-            UpdateTables(); // Обновляем таблицы
-        }
-
-        private void CenterGraph()
-        {
-            if (graph == null)
-            {
-                Debug.LogError("Graph is null!");
-                return;
-            }
-
-            graph.CenterGraph();
         }
 
         private void UpdateStructure()
         {
             structureContainer.Clear();
 
-            // Создаем дерево
-            var tree = new VisualElement();
-            tree.style.flexGrow = 1;
-            tree.style.flexDirection = FlexDirection.Column;
-            tree.style.paddingTop = 10;
-            tree.style.paddingRight = 10;
-            tree.style.paddingBottom = 10;
-            tree.style.paddingLeft = 10;
-            structureContainer.Add(tree);
-
-            // Заголовок
-            var header = new Label("Иерархия объектов");
-            header.style.unityFontStyleAndWeight = FontStyle.Bold;
-            header.style.fontSize = 16;
-            header.style.marginBottom = 10;
-            tree.Add(header);
-
-            // Получаем все префабы
-            string[] prefabGuids = AssetDatabase.FindAssets("t:Prefab", new[] { "Assets" });
-            Debug.Log($"Найдено {prefabGuids.Length} префабов в проекте");
-
-            var prefabs = prefabGuids
-                .Select(guid => AssetDatabase.GUIDToAssetPath(guid))
-                .Where(path => 
-                    !path.Contains("Packages/") && 
-                    !path.Contains("Library/"))
-                .ToList();
-
-            Debug.Log($"Отфильтровано {prefabs.Count} префабов после исключения Packages и Library");
-
-            if (prefabs.Count == 0)
+            // Получаем все префабы в выбранной папке
+            string[] prefabGuids = AssetDatabase.FindAssets("t:Prefab", new[] { selectedFolder });
+            foreach (var guid in prefabGuids)
             {
-                var noPrefabsLabel = new Label("Префабы не найдены. Создайте префабы в папке Assets для отображения иерархии.");
-                noPrefabsLabel.style.marginTop = 20;
-                noPrefabsLabel.style.color = new Color(0.7f, 0.7f, 0.7f);
-                tree.Add(noPrefabsLabel);
-                return;
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (path.Contains("Packages/") || path.Contains("Library/")) continue;
+
+                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                if (prefab == null) continue;
+
+                var prefabElement = CreatePrefabElement(prefab);
+                structureContainer.Add(prefabElement);
             }
 
-            foreach (var prefabPath in prefabs)
+            // Получаем все сцены в выбранной папке
+            string[] sceneGuids = AssetDatabase.FindAssets("t:Scene", new[] { selectedFolder });
+            foreach (var guid in sceneGuids)
             {
-                Debug.Log($"Загрузка префаба: {prefabPath}");
-                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
-                if (prefab != null)
-                {
-                    Debug.Log($"Успешно загружен префаб: {prefab.name}");
-                    var prefabElement = CreatePrefabElement(prefab);
-                    tree.Add(prefabElement);
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (path.Contains("Packages/") || path.Contains("Library/")) continue;
 
-                    // Добавляем все дочерние объекты
-                    AddChildObjects(prefabElement, prefab.transform, 1);
-                }
-                else
-                {
-                    Debug.LogWarning($"Не удалось загрузить префаб: {prefabPath}");
-                }
+                var scene = AssetDatabase.LoadAssetAtPath<SceneAsset>(path);
+                if (scene == null) continue;
+
+                var sceneElement = new VisualElement();
+                sceneElement.style.marginBottom = 10;
+                sceneElement.style.paddingTop = 10;
+                sceneElement.style.paddingRight = 10;
+                sceneElement.style.paddingBottom = 10;
+                sceneElement.style.paddingLeft = 10;
+                sceneElement.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f);
+
+                var sceneHeader = new Label($"Scene: {scene.name}");
+                sceneHeader.style.unityFontStyleAndWeight = FontStyle.Bold;
+                sceneHeader.style.fontSize = 14;
+                sceneElement.Add(sceneHeader);
+
+                structureContainer.Add(sceneElement);
             }
         }
 
         private VisualElement CreatePrefabElement(GameObject prefab)
         {
-            var element = new VisualElement();
-            element.style.flexDirection = FlexDirection.Column;
-            element.style.marginTop = 10;
+            var container = new VisualElement();
+            container.style.marginBottom = 10;
+            container.style.paddingTop = 10;
+            container.style.paddingRight = 10;
+            container.style.paddingBottom = 10;
+            container.style.paddingLeft = 10;
+            container.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f);
 
-            var header = new VisualElement();
-            header.style.flexDirection = FlexDirection.Row;
-            header.style.alignItems = Align.Center;
-            element.Add(header);
+            var header = new Label($"Prefab: {prefab.name}");
+            header.style.unityFontStyleAndWeight = FontStyle.Bold;
+            header.style.fontSize = 14;
+            container.Add(header);
 
-            var icon = new Label("📦");
-            icon.style.marginRight = 5;
-            header.Add(icon);
+            AddChildObjects(container, prefab.transform, 0);
 
-            var name = new Label($"{prefab.name} (Prefab)");
-            name.style.unityFontStyleAndWeight = FontStyle.Bold;
-            header.Add(name);
-
-            return element;
+            return container;
         }
 
         private void AddChildObjects(VisualElement parent, Transform transform, int depth)
@@ -853,71 +902,84 @@ namespace ArchitectureVisualizer
             {
                 var childElement = CreateObjectElement(child.gameObject, depth);
                 parent.Add(childElement);
-
-                // Рекурсивно добавляем дочерние объекты
-                if (child.childCount > 0)
-                {
-                    AddChildObjects(childElement, child, depth + 1);
-                }
+                AddChildObjects(childElement, child, depth + 1);
             }
         }
 
         private VisualElement CreateObjectElement(GameObject obj, int depth)
         {
-            var element = new VisualElement();
-            element.style.flexDirection = FlexDirection.Column;
-            element.style.marginLeft = depth * 20;
-            element.style.marginTop = 2;
+            var container = new VisualElement();
+            container.style.marginLeft = depth * 20;
+            container.style.paddingTop = 5;
+            container.style.paddingRight = 5;
+            container.style.paddingBottom = 5;
+            container.style.paddingLeft = 5;
+            container.style.borderLeftWidth = 1;
+            container.style.borderLeftColor = new Color(0.3f, 0.3f, 0.3f);
 
-            var header = new VisualElement();
-            header.style.flexDirection = FlexDirection.Row;
-            header.style.alignItems = Align.Center;
-            element.Add(header);
+            var label = new Label(obj.name);
+            label.style.unityFontStyleAndWeight = FontStyle.Normal;
+            container.Add(label);
 
-            // Добавляем отступы для иерархии
-            var indent = new Label(new string(' ', depth * 2) + "├─ ");
-            indent.style.whiteSpace = WhiteSpace.NoWrap;
-            header.Add(indent);
+            return container;
+        }
+    }
 
-            // Иконка в зависимости от типа объекта
-            var icon = new Label(obj.transform.childCount > 0 ? "📁" : "📄");
-            icon.style.marginRight = 5;
-            header.Add(icon);
+    public class DependencyData
+    {
+        public List<EventData> Events = new List<EventData>();
+        public List<HardDependencyData> HardDependencies = new List<HardDependencyData>();
+        public List<DIData> Dependencies = new List<DIData>();
+        public List<ScriptableObjectData> ScriptableObjects = new List<ScriptableObjectData>();
+        public List<SingletonData> Singletons = new List<SingletonData>();
+        public List<MessageData> Messages = new List<MessageData>();
 
-            // Имя объекта
-            var name = new Label(obj.name);
-            header.Add(name);
+        public class EventData
+        {
+            public string Generator;
+            public string Subscriber;
+            public string SubscriberMethod;
+            public string Description;
+        }
 
-            // Добавляем информацию о компонентах
-            var components = obj.GetComponents<Component>();
-            if (components.Length > 1) // Больше 1, потому что Transform всегда есть
-            {
-                var componentsList = new VisualElement();
-                componentsList.style.marginLeft = 20;
-                componentsList.style.marginTop = 2;
+        public class HardDependencyData
+        {
+            public string Consumer;
+            public string Dependency;
+            public string AccessMethod;
+            public string Risks;
+        }
 
-                foreach (var component in components)
-                {
-                    if (component is Transform) continue; // Пропускаем Transform
+        public class DIData
+        {
+            public string Class;
+            public string Interface;
+            public string InjectionMethod;
+            public string Notes;
+        }
 
-                    var componentElement = new VisualElement();
-                    componentElement.style.flexDirection = FlexDirection.Row;
-                    componentElement.style.marginTop = 2;
+        public class ScriptableObjectData
+        {
+            public string SOObject;
+            public string User;
+            public string MethodOrProperty;
+            public string Notes;
+        }
 
-                    var componentIndent = new Label(new string(' ', (depth + 1) * 2) + "└─ ");
-                    componentIndent.style.whiteSpace = WhiteSpace.NoWrap;
-                    componentElement.Add(componentIndent);
+        public class SingletonData
+        {
+            public string SingletonClass;
+            public string User;
+            public string AccessMethod;
+            public string Problems;
+        }
 
-                    var componentName = new Label(component.GetType().Name);
-                    componentElement.Add(componentName);
-
-                    componentsList.Add(componentElement);
-                }
-
-                element.Add(componentsList);
-            }
-
-            return element;
+        public class MessageData
+        {
+            public string Sender;
+            public string Receiver;
+            public string MessageType;
+            public string Notes;
         }
     }
 }
