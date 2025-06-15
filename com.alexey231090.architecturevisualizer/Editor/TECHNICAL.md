@@ -1,164 +1,232 @@
-# Техническая документация Architecture Visualizer
+# Техническая документация
 
-## Реализация основных компонентов
+## Архитектура плагина
 
-### 1. Архитектура окна редактора
+### Основные компоненты
+
+#### 1. ArchitectureVisualizerWindow
+Главное окно плагина, реализующее интерфейс пользователя.
+
+**Основные функции:**
+- Создание и управление вкладками
+- Анализ проекта
+- Отображение структуры проекта
+- Детальный анализ скриптов
+- Поддержка вложенных типов
+- Отображение значений массивов и коллекций
+
+**Ключевые методы:**
+- `CreateGUI()` - создание интерфейса
+- `AnalyzeProject()` - анализ проекта
+- `UpdateScriptDetails()` - обновление деталей скриптов
+- `UpdateProjectStructure()` - обновление структуры проекта
+- `GetFieldValue()` - получение значения поля с поддержкой вложенных типов
+
+#### 2. ScriptAnalyzer
+Компонент для анализа скриптов проекта.
+
+**Основные функции:**
+- Анализ зависимостей между скриптами
+- Определение типов полей
+- Анализ использования компонентов
+- Поддержка вложенных типов
+- Анализ массивов и коллекций
+
+**Ключевые методы:**
+- `AnalyzeScripts()` - анализ всех скриптов
+- `GetFieldValue()` - получение значения поля
+- `AnalyzeFieldUsage()` - анализ использования поля
+- `ProcessNestedTypes()` - обработка вложенных типов
+- `ProcessCollections()` - обработка коллекций
+
+#### 3. ProjectStructureView
+Компонент для отображения структуры проекта.
+
+**Основные функции:**
+- Отображение иерархии папок
+- Группировка скриптов
+- Навигация по структуре
+
+**Ключевые методы:**
+- `UpdateStructure()` - обновление структуры
+- `CreateFolderElement()` - создание элемента папки
+- `CreateScriptElement()` - создание элемента скрипта
+
+#### 4. ScriptDetailsView
+Компонент для детального анализа скриптов.
+
+**Основные функции:**
+- Отображение полей скрипта
+- Показ текущих значений
+- Анализ использования полей
+- Поддержка вложенных типов
+- Отображение значений коллекций
+
+**Ключевые методы:**
+- `UpdateDetails()` - обновление деталей
+- `CreateFieldElement()` - создание элемента поля
+- `ShowFieldValue()` - отображение значения поля
+- `ProcessNestedType()` - обработка вложенного типа
+- `ProcessCollection()` - обработка коллекции
+
+### Структура данных
+
+#### ScriptInfo
 ```csharp
-public class ArchitectureVisualizerWindow : EditorWindow
+public class ScriptInfo
 {
-    [MenuItem("Tools/Architecture Visualizer")]
-    public static void ShowWindow()
-    {
-        var window = GetWindow<ArchitectureVisualizerWindow>();
-        window.titleContent = new GUIContent("Architecture Visualizer");
-    }
+    public string Name { get; set; }
+    public string Path { get; set; }
+    public List<FieldInfo> Fields { get; set; }
+    public List<string> Dependencies { get; set; }
+    public List<Type> NestedTypes { get; set; }
 }
 ```
 
-### 2. Графический интерфейс
-Плагин использует UIElements для создания интерфейса:
-- GraphView для визуализации зависимостей
-- Кнопки и элементы управления через UIElements
-- Стилизация через USS
-
-### 3. Анализ зависимостей
-#### ScriptAnalyzer
+#### FieldInfo
 ```csharp
-public static class ScriptAnalyzer
+public class FieldInfo
 {
-    public static void FindDependencies(GraphView graph)
-    {
-        MonoBehaviour[] scripts = Object.FindObjectsOfType<MonoBehaviour>();
-        // Анализ зависимостей
-    }
+    public string Name { get; set; }
+    public Type Type { get; set; }
+    public object Value { get; set; }
+    public bool IsPublic { get; set; }
+    public bool IsNested { get; set; }
+    public Type DeclaringType { get; set; }
 }
 ```
 
-#### AssetAnalyzer
-```csharp
-public class AssetAnalyzer : IAnalyzer
-{
-    public void Analyze(ProjectGraph graph)
-    {
-        // Анализ ассетов
-    }
+### UI Компоненты
+
+#### Вкладки
+1. **Tables**
+   - Таблицы с зависимостями
+   - Фильтрация и сортировка
+   - Экспорт данных
+
+2. **Structure**
+   - Древовидное отображение
+   - Группировка по папкам
+   - Навигация
+
+3. **Script Details**
+   - Список скриптов
+   - Детали полей
+   - Текущие значения
+   - Вложенные типы
+   - Значения коллекций
+
+### Стилизация
+
+#### Основные стили
+```css
+.unity-base-field {
+    margin: 5px;
+    padding: 5px;
+}
+
+.unity-base-field__label {
+    color: #E1E1E1;
+}
+
+.unity-base-field__input {
+    background-color: #383838;
+    border-color: #505050;
 }
 ```
 
-### 4. Модель данных
-#### ProjectGraph
-```csharp
-public class ProjectGraph
-{
-    public List<Node> Nodes { get; private set; }
-    public List<Edge> Edges { get; private set; }
-    
-    public void AddNode(Node node) { }
-    public void AddEdge(Edge edge) { }
+#### Стили для вкладок
+```css
+.tab {
+    padding: 10px;
+    margin: 5px;
+    background-color: #2D2D2D;
+    border-radius: 4px;
+}
+
+.tab-content {
+    padding: 10px;
+    margin-top: 5px;
 }
 ```
-
-#### Node и Edge
-```csharp
-public class Node
-{
-    public string Title { get; set; }
-    public Vector2 Position { get; set; }
-    public List<Port> Ports { get; private set; }
-}
-
-public class Edge
-{
-    public Node Source { get; set; }
-    public Node Target { get; set; }
-}
-```
-
-## Интерфейсы для расширения
-
-### IAnalyzer
-```csharp
-public interface IAnalyzer
-{
-    void Analyze(ProjectGraph graph);
-    string Name { get; }
-}
-```
-
-### IVisualizer
-```csharp
-public interface IVisualizer
-{
-    void Visualize(ProjectGraph graph);
-    string Name { get; }
-}
-```
-
-## Процесс анализа
-
-1. **Сбор данных**
-   - Сканирование скриптов
-   - Анализ префабов
-   - Поиск зависимостей
-
-2. **Построение графа**
-   - Создание узлов
-   - Установка связей
-   - Позиционирование элементов
-
-3. **Визуализация**
-   - Отрисовка графа
-   - Интерактивные элементы
-   - Фильтрация данных
-
-## Оптимизация
-
-### Кеширование
-- Сохранение результатов анализа
-- Инкрементальное обновление
-- Управление памятью
-
-### Производительность
-- Асинхронный анализ
-- Оптимизация запросов к AssetDatabase
-- Эффективное использование GraphView
-
-## Расширение функциональности
-
-### Добавление нового анализатора
-1. Создать класс, реализующий IAnalyzer
-2. Реализовать метод Analyze
-3. Зарегистрировать в системе
-
-### Добавление новой визуализации
-1. Создать класс, реализующий IVisualizer
-2. Реализовать метод Visualize
-3. Добавить в UI
-
-## Отладка и тестирование
-
-### Логирование
-```csharp
-[System.Diagnostics.Conditional("UNITY_EDITOR")]
-private void LogAnalysis(string message)
-{
-    Debug.Log($"[ArchitectureVisualizer] {message}");
-}
-```
-
-### Тестирование
-- Unit тесты для анализаторов
-- Интеграционные тесты для UI
-- Тесты производительности
-
-## Безопасность
 
 ### Обработка ошибок
-- Try-catch блоки для критических операций
-- Валидация входных данных
-- Безопасное освобождение ресурсов
 
-### Ограничения
-- Только редакторский режим
-- Проверка прав доступа
-- Безопасная сериализация 
+#### Основные типы ошибок
+1. **Ошибки анализа**
+   - Недоступные скрипты
+   - Неподдерживаемые типы
+   - Ошибки компиляции
+   - Проблемы с вложенными типами
+
+2. **Ошибки UI**
+   - Отсутствующие ресурсы
+   - Проблемы с отображением
+   - Ошибки стилизации
+
+#### Обработка ошибок
+```csharp
+try {
+    // Код, который может вызвать ошибку
+} catch (Exception ex) {
+    Debug.LogError($"Ошибка: {ex.Message}");
+    // Обработка ошибки
+}
+```
+
+### Производительность
+
+#### Оптимизации
+1. **Кэширование**
+   - Кэширование результатов анализа
+   - Кэширование значений полей
+   - Кэширование структуры проекта
+   - Кэширование вложенных типов
+
+2. **Ленивая загрузка**
+   - Загрузка данных по требованию
+   - Отложенная инициализация
+   - Асинхронная загрузка
+
+3. **Ограничения**
+   - Максимальное количество скриптов
+   - Максимальная глубина анализа
+   - Таймауты операций
+
+### Расширяемость
+
+#### Точки расширения
+1. **Анализаторы**
+   - Добавление новых типов анализа
+   - Расширение существующих анализаторов
+   - Кастомные правила анализа
+   - Поддержка новых типов коллекций
+
+2. **Визуализация**
+   - Новые типы отображения
+   - Кастомные стили
+   - Дополнительные фильтры
+   - Улучшенное отображение коллекций
+
+3. **Экспорт**
+   - Новые форматы экспорта
+   - Кастомные шаблоны
+   - Дополнительные метаданные
+
+### Безопасность
+
+#### Основные аспекты
+1. **Доступ к данным**
+   - Проверка прав доступа
+   - Валидация входных данных
+   - Безопасное хранение
+
+2. **Обработка ошибок**
+   - Логирование ошибок
+   - Восстановление после сбоев
+   - Защита от утечек
+
+3. **Конфиденциальность**
+   - Защита конфиденциальных данных
+   - Шифрование при необходимости
+   - Безопасная передача данных 

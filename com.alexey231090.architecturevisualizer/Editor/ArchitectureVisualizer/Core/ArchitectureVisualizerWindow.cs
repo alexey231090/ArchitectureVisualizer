@@ -1,21 +1,28 @@
 using UnityEngine;
 using UnityEditor;
-using UnityEditor.UIElements;
+using UnityEditor.Experimental.GraphView;
 using UnityEngine.UIElements;
+using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
+using System.Reflection;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Collections.Specialized;
 
 namespace ArchitectureVisualizer
 {
     public class ArchitectureVisualizerWindow : EditorWindow
     {
-        private VisualElement tableContainer;
         private TabView tabView;
         private VisualElement structureContainer;
         private ScrollView tablesContainer;
+        private ScrollView scriptDetailsContainer;
         private DependencyData dependencyData = new DependencyData();
         private string selectedFolder = "Assets"; // По умолчанию анализируем всю папку Assets
+        private Label pathLabel; // Добавляем поле для метки пути
 
         private void OnEnable()
         {
@@ -36,45 +43,46 @@ namespace ArchitectureVisualizer
 
         private void CreateGUI()
         {
-            Debug.Log("Creating GUI...");
+            Debug.Log("Starting CreateGUI...");
+            var rootVisualElement = this.rootVisualElement;
             
             // Очищаем существующие элементы
             rootVisualElement.Clear();
+            
+            // Добавляем стили
+            rootVisualElement.styleSheets.Add(AssetDatabase.LoadAssetAtPath<StyleSheet>("Packages/com.alexey231090.architecturevisualizer/Editor/ArchitectureVisualizer/Resources/styles.uss"));
 
             // Создаем контейнер для кнопок
             var buttonContainer = new VisualElement();
             buttonContainer.style.flexDirection = FlexDirection.Row;
+            buttonContainer.style.alignItems = Align.Center;
             buttonContainer.style.marginBottom = 10;
             buttonContainer.style.paddingTop = 10;
             buttonContainer.style.paddingRight = 10;
             buttonContainer.style.paddingBottom = 10;
             buttonContainer.style.paddingLeft = 10;
-            rootVisualElement.Add(buttonContainer);
 
-            // Кнопка для выбора папки
-            var selectFolderButton = new Button(() => SelectFolder())
-            {
-                text = "Select Folder",
-                style = { marginRight = 10 }
-            };
-            selectFolderButton.style.backgroundColor = new Color(0.3f, 0.4f, 0.5f);
-            selectFolderButton.style.color = Color.white;
-            buttonContainer.Add(selectFolderButton);
-
-            // Метка с текущей выбранной папкой
-            var folderLabel = new Label($"Current folder: {selectedFolder}");
-            folderLabel.style.marginRight = 10;
-            buttonContainer.Add(folderLabel);
-
-            // Кнопка для анализа
-            var analyzeButton = new Button(() => AnalyzeProject())
-            {
-                text = "Analyze Project",
-                style = { marginRight = 10 }
-            };
+            // Кнопка анализа проекта (слева)
+            var analyzeButton = new Button(() => AnalyzeProject()) { text = "Analyze Project" };
+            analyzeButton.style.width = 150;
             analyzeButton.style.backgroundColor = new Color(0.4f, 0.5f, 0.3f);
             analyzeButton.style.color = Color.white;
             buttonContainer.Add(analyzeButton);
+
+            // Кнопка выбора папки (после кнопки анализа)
+            var openFolderButton = new Button(() => OpenProjectFolder()) { text = "Select Folder" };
+            openFolderButton.style.width = 150;
+            openFolderButton.style.backgroundColor = new Color(0.3f, 0.4f, 0.5f);
+            openFolderButton.style.color = Color.white;
+            buttonContainer.Add(openFolderButton);
+
+            // Метка с текущим путем (после кнопки выбора папки)
+            pathLabel = new Label($"Current path: {selectedFolder}");
+            pathLabel.style.marginLeft = 10;
+            pathLabel.style.marginRight = 10;
+            buttonContainer.Add(pathLabel);
+
+            rootVisualElement.Add(buttonContainer);
 
             Debug.Log("Creating TabView...");
             // Создаем TabView
@@ -100,6 +108,33 @@ namespace ArchitectureVisualizer
             structureTab.SetContent(structureContainer);
             tabView.AddTab(structureTab);
 
+            // Добавляем вкладку для деталей скриптов (третья)
+            var scriptDetailsTab = new Tab("Script Details");
+            scriptDetailsContainer = new ScrollView();
+            scriptDetailsContainer.style.flexGrow = 1;
+            scriptDetailsTab.SetContent(scriptDetailsContainer);
+            tabView.AddTab(scriptDetailsTab);
+
+            Debug.Log($"Created {tabView.childCount} tabs");
+            foreach (var tab in tabView.Children())
+            {
+                if (tab is Tab tabElement)
+                {
+                    Debug.Log($"Tab: {tabElement.text}, Content: {tabElement.content != null}");
+                }
+            }
+
+            // Выбираем первую вкладку по умолчанию
+            if (tabView.childCount > 0)
+            {
+                var firstTab = tabView.ElementAt(0) as Tab;
+                if (firstTab != null)
+                {
+                    firstTab.AddToClassList("unity-tab--selected");
+                    firstTab.MarkDirtyRepaint();
+                }
+            }
+
             // Принудительно обновляем окно
             rootVisualElement.MarkDirtyRepaint();
             Debug.Log("GUI creation completed");
@@ -107,36 +142,91 @@ namespace ArchitectureVisualizer
 
         private void SelectFolder()
         {
-            string path = EditorUtility.OpenFolderPanel("Select Folder to Analyze", "Assets", "");
+            string path = EditorUtility.OpenFolderPanel("Select Folder", selectedFolder, "");
             if (!string.IsNullOrEmpty(path))
             {
-                // Преобразуем абсолютный путь в путь относительно проекта
-                string projectPath = Application.dataPath;
-                if (path.StartsWith(projectPath))
-                {
-                    selectedFolder = "Assets" + path.Substring(projectPath.Length);
-                }
-                else
-                {
-                    EditorUtility.DisplayDialog("Invalid Folder", "Please select a folder within your Unity project.", "OK");
-                    return;
-                }
-
-                // Обновляем метку с текущей папкой
-                var folderLabel = rootVisualElement.Q<Label>();
-                if (folderLabel != null)
-                {
-                    folderLabel.text = $"Current folder: {selectedFolder}";
-                }
+                // Преобразуем путь в относительный путь Unity
+                string relativePath = "Assets" + path.Substring(Application.dataPath.Length);
+                selectedFolder = relativePath;
+                Debug.Log($"Selected folder: {selectedFolder}");
+                // Обновляем метку пути
+                pathLabel.text = $"Current path: {selectedFolder}";
             }
         }
 
         private void AnalyzeProject()
         {
             Debug.Log("Starting project analysis...");
-            UpdateTables();
-            UpdateStructure();
-            Debug.Log("Project analysis completed");
+            try
+            {
+                // Сохраняем текущую вкладку
+                var currentTab = tabView.Q<Tab>(className: "unity-tab--selected");
+                int currentTabIndex = currentTab != null ? tabView.IndexOf(currentTab) : -1;
+
+                // Если вкладка не выбрана или выбрана неправильно, выбираем Tables
+                if (currentTabIndex == -1 || currentTabIndex >= tabView.childCount)
+                {
+                    currentTabIndex = 0; // Индекс вкладки Tables
+                }
+
+                // Анализируем скрипты
+                AnalyzeScriptsInFolder(selectedFolder);
+
+                // Обновляем все вкладки
+                UpdateTables();
+                UpdateStructure();
+                UpdateScriptDetails();
+
+                // Восстанавливаем выбранную вкладку
+                if (currentTabIndex >= 0 && currentTabIndex < tabView.childCount)
+                {
+                    // Сначала убираем класс у всех вкладок
+                    foreach (var tab in tabView.Children())
+                    {
+                        tab.RemoveFromClassList("unity-tab--selected");
+                    }
+                    
+                    // Затем добавляем класс к нужной вкладке
+                    var tabToSelect = tabView.ElementAt(currentTabIndex) as Tab;
+                    if (tabToSelect != null)
+                    {
+                        tabToSelect.AddToClassList("unity-tab--selected");
+                        tabToSelect.MarkDirtyRepaint();
+                    }
+                }
+
+                Debug.Log("Project analysis completed successfully.");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error during project analysis: {ex.Message}");
+                EditorUtility.DisplayDialog("Analysis Error", 
+                    "An error occurred during project analysis. Check the console for details.", "OK");
+            }
+        }
+
+        private void AnalyzeScriptsInFolder(string folderPath)
+        {
+            Debug.Log($"Analyzing scripts in folder: {folderPath}");
+            try
+            {
+                // Получаем все скрипты в выбранной папке
+                string[] scriptGuids = AssetDatabase.FindAssets("t:Script", new[] { folderPath });
+                foreach (string guid in scriptGuids)
+                {
+                    string path = AssetDatabase.GUIDToAssetPath(guid);
+                    if (!string.IsNullOrEmpty(path))
+                    {
+                        Debug.Log($"Found script: {path}");
+                        // Здесь можно добавить дополнительный анализ скрипта
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error analyzing scripts: {ex.Message}");
+                throw;
+            }
         }
 
         private void UpdateTables()
@@ -920,8 +1010,270 @@ namespace ArchitectureVisualizer
             var label = new Label(obj.name);
             label.style.unityFontStyleAndWeight = FontStyle.Normal;
             container.Add(label);
-
             return container;
+        }
+
+        private void UpdateScriptDetails()
+        {
+            Debug.Log("Updating Script Details...");
+            
+            if (scriptDetailsContainer == null)
+            {
+                Debug.LogError("Script Details container is null!");
+                return;
+            }
+
+            scriptDetailsContainer.Clear();
+
+            // Получаем все скрипты в выбранной папке
+            string[] scriptGuids = AssetDatabase.FindAssets("t:Script", new[] { selectedFolder });
+            Debug.Log($"Found {scriptGuids.Length} scripts in {selectedFolder}");
+
+            foreach (var guid in scriptGuids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (path.Contains("Packages/") || path.Contains("Library/")) continue;
+
+                var script = AssetDatabase.LoadAssetAtPath<MonoScript>(path);
+                if (script == null) continue;
+
+                var type = script.GetClass();
+                if (type == null) continue;
+
+                Debug.Log($"Processing script: {script.name}");
+
+                var scriptContainer = new VisualElement();
+                scriptContainer.style.marginBottom = 10;
+                scriptContainer.style.paddingTop = 10;
+                scriptContainer.style.paddingRight = 10;
+                scriptContainer.style.paddingBottom = 10;
+                scriptContainer.style.paddingLeft = 10;
+                scriptContainer.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f);
+                scriptContainer.style.flexDirection = FlexDirection.Column;
+
+                // Заголовок скрипта
+                var scriptHeader = new Label($"Script: {script.name}");
+                scriptHeader.style.unityFontStyleAndWeight = FontStyle.Bold;
+                scriptHeader.style.fontSize = 14;
+                scriptContainer.Add(scriptHeader);
+
+                // Поля скрипта
+                var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+                foreach (var field in fields)
+                {
+                    var fieldContainer = new VisualElement();
+                    fieldContainer.style.marginTop = 5;
+                    fieldContainer.style.marginLeft = 20;
+
+                    var fieldLabel = new Label($"{field.Name} ({field.FieldType.Name})");
+                    fieldLabel.style.unityFontStyleAndWeight = FontStyle.Normal;
+                    fieldContainer.Add(fieldLabel);
+
+                    var valueLabel = new Label($"Value: {GetFieldValue(field, type)}");
+                    valueLabel.style.marginLeft = 20;
+                    fieldContainer.Add(valueLabel);
+
+                    scriptContainer.Add(fieldContainer);
+                }
+
+                scriptDetailsContainer.Add(scriptContainer);
+            }
+
+            scriptDetailsContainer.MarkDirtyRepaint();
+            Debug.Log("Script Details updated successfully");
+        }
+
+        private string GetFieldValue(FieldInfo field, Type type)
+        {
+            try
+            {
+                if (type == null || field == null)
+                    return "N/A";
+
+                // Проверяем, является ли поле частью вложенного типа
+                if (field.DeclaringType != type)
+                {
+                    return $"Type: {field.FieldType.Name} (from {field.DeclaringType.Name})";
+                }
+
+                // Для MonoBehaviour ищем объекты на сцене
+                if (typeof(MonoBehaviour).IsAssignableFrom(type))
+                {
+                    var objects = UnityEngine.Object.FindObjectsOfType(type);
+                    if (objects != null && objects.Length > 0)
+                    {
+                        var obj = objects[0];
+                        var value = field.GetValue(obj);
+                        if (value != null)
+                        {
+                            if (value is UnityEngine.Object unityObj)
+                            {
+                                return unityObj.name;
+                            }
+                            else if (value is Array array)
+                            {
+                                var elements = new List<string>();
+                                for (int i = 0; i < array.Length; i++)
+                                {
+                                    var element = array.GetValue(i);
+                                    elements.Add(element?.ToString() ?? "null");
+                                }
+                                return $"Array[{array.Length}]: [{string.Join(", ", elements)}]";
+                            }
+                            else if (value is System.Collections.IList list)
+                            {
+                                var elements = new List<string>();
+                                foreach (var item in list)
+                                {
+                                    elements.Add(item?.ToString() ?? "null");
+                                }
+                                return $"List[{list.Count}]: [{string.Join(", ", elements)}]";
+                            }
+                            else if (value is System.Collections.IDictionary dict)
+                            {
+                                var elements = new List<string>();
+                                foreach (var entry in dict)
+                                {
+                                    var keyValue = (KeyValuePair<object, object>)entry;
+                                    elements.Add($"{keyValue.Key}: {keyValue.Value}");
+                                }
+                                return $"Dictionary[{dict.Count}]: [{string.Join(", ", elements)}]";
+                            }
+                            else
+                            {
+                                return value.ToString();
+                            }
+                        }
+                        return "null";
+                    }
+                    return $"Type: {type.Name} (MonoBehaviour)";
+                }
+
+                // Для остальных типов создаем экземпляр
+                try
+                {
+                    object instance;
+                    
+                    // Если тип вложенный, создаем экземпляр внешнего типа
+                    if (type.IsNested)
+                    {
+                        var outerType = type.DeclaringType;
+                        if (typeof(MonoBehaviour).IsAssignableFrom(outerType))
+                        {
+                            return $"Type: {type.Name} (Nested in MonoBehaviour)";
+                        }
+                        var outerInstance = Activator.CreateInstance(outerType);
+                        instance = Activator.CreateInstance(type, BindingFlags.NonPublic | BindingFlags.Instance, null, new object[] { outerInstance }, null);
+                    }
+                    else
+                    {
+                        instance = Activator.CreateInstance(type);
+                    }
+
+                    var value = field.GetValue(instance);
+                    
+                    if (value == null)
+                        return "null";
+
+                    // Обработка специальных типов
+                    if (value is UnityEngine.Object unityObj)
+                    {
+                        return unityObj.name;
+                    }
+                    else if (value is Array array)
+                    {
+                        var elements = new List<string>();
+                        for (int i = 0; i < array.Length; i++)
+                        {
+                            var element = array.GetValue(i);
+                            elements.Add(element?.ToString() ?? "null");
+                        }
+                        return $"Array[{array.Length}]: [{string.Join(", ", elements)}]";
+                    }
+                    else if (value is System.Collections.IList list)
+                    {
+                        var elements = new List<string>();
+                        foreach (var item in list)
+                        {
+                            elements.Add(item?.ToString() ?? "null");
+                        }
+                        return $"List[{list.Count}]: [{string.Join(", ", elements)}]";
+                    }
+                    else if (value is System.Collections.IDictionary dict)
+                    {
+                        var elements = new List<string>();
+                        foreach (var entry in dict)
+                        {
+                            var keyValue = (KeyValuePair<object, object>)entry;
+                            elements.Add($"{keyValue.Key}: {keyValue.Value}");
+                        }
+                        return $"Dictionary[{dict.Count}]: [{string.Join(", ", elements)}]";
+                    }
+                    else if (value is System.Enum enumValue)
+                    {
+                        return enumValue.ToString();
+                    }
+                    else if (value is System.ValueType)
+                    {
+                        return value.ToString();
+                    }
+                    else if (type.IsPrimitive || type == typeof(string))
+                    {
+                        return value.ToString();
+                    }
+                    else
+                    {
+                        return value.ToString();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"Failed to create instance of {type.Name}: {ex.Message}");
+                    
+                    // Если не удалось создать экземпляр, возвращаем информацию о типе
+                    if (type.IsPrimitive || type == typeof(string) || type.IsEnum)
+                    {
+                        return $"Type: {type.Name}";
+                    }
+                    else if (type.IsArray)
+                    {
+                        return $"Array of {type.GetElementType().Name}";
+                    }
+                    else if (type.IsGenericType)
+                    {
+                        var genericArgs = type.GetGenericArguments();
+                        var typeNames = string.Join(", ", genericArgs.Select(t => t.Name));
+                        return $"Generic<{typeNames}>";
+                    }
+                    else if (type.IsNested)
+                    {
+                        return $"Nested Type: {type.Name} in {type.DeclaringType.Name}";
+                    }
+                    else
+                    {
+                        return $"Type: {type.Name}";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"Warning getting field value for {field?.Name}: {ex.Message}");
+                return $"Type: {type?.Name ?? "Unknown"}";
+            }
+        }
+
+        private void OpenProjectFolder()
+        {
+            string path = EditorUtility.OpenFolderPanel("Select Folder to Analyze", selectedFolder, "");
+            if (!string.IsNullOrEmpty(path))
+            {
+                // Преобразуем путь в относительный путь Unity
+                string relativePath = "Assets" + path.Substring(Application.dataPath.Length);
+                selectedFolder = relativePath;
+                Debug.Log($"Selected folder: {selectedFolder}");
+                // Обновляем метку пути
+                pathLabel.text = $"Current path: {selectedFolder}";
+            }
         }
     }
 

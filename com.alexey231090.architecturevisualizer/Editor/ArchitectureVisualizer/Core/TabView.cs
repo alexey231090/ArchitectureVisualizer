@@ -38,7 +38,7 @@ public class TabView : VisualElement
     {
         if (selectedTab != null)
         {
-            selectedTab.RemoveFromClassList("selected");
+            selectedTab.RemoveFromClassList("unity-tab--selected");
             if (selectedTab.content != null)
             {
                 contentContainer.Remove(selectedTab.content);
@@ -46,7 +46,7 @@ public class TabView : VisualElement
         }
 
         selectedTab = tab;
-        selectedTab.AddToClassList("selected");
+        selectedTab.AddToClassList("unity-tab--selected");
         if (selectedTab.content != null)
         {
             contentContainer.Add(selectedTab.content);
