@@ -23,6 +23,10 @@ namespace ArchitectureVisualizer
         private DependencyData dependencyData = new DependencyData();
         private string selectedFolder = "Assets"; // По умолчанию анализируем всю папку Assets
         private Label pathLabel; // Добавляем поле для метки пути
+        
+        // Добавляем словарь для отслеживания состояния скриптов
+        private Dictionary<string, bool> scriptExpandedStates = new Dictionary<string, bool>();
+        private List<string> scriptOrder = new List<string>();
 
         private void OnEnable()
         {
@@ -1029,14 +1033,18 @@ namespace ArchitectureVisualizer
             string[] scriptGuids = AssetDatabase.FindAssets("t:Script", new[] { selectedFolder });
             Debug.Log($"Found {scriptGuids.Length} scripts in {selectedFolder}");
 
-            foreach (var guid in scriptGuids)
+            // Сортируем скрипты: сначала открытые, потом закрытые
+            var sortedScripts = scriptGuids
+                .Select(guid => AssetDatabase.GUIDToAssetPath(guid))
+                .Where(path => !path.Contains("Packages/") && !path.Contains("Library/"))
+                .Select(path => AssetDatabase.LoadAssetAtPath<MonoScript>(path))
+                .Where(script => script != null)
+                .OrderByDescending(script => scriptExpandedStates.ContainsKey(script.name) && scriptExpandedStates[script.name])
+                .ThenBy(script => script.name)
+                .ToList();
+
+            foreach (var script in sortedScripts)
             {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (path.Contains("Packages/") || path.Contains("Library/")) continue;
-
-                var script = AssetDatabase.LoadAssetAtPath<MonoScript>(path);
-                if (script == null) continue;
-
                 var type = script.GetClass();
                 if (type == null) continue;
 
@@ -1051,11 +1059,37 @@ namespace ArchitectureVisualizer
                 scriptContainer.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f);
                 scriptContainer.style.flexDirection = FlexDirection.Column;
 
+                // Создаем контейнер для заголовка и кнопки сворачивания
+                var headerContainer = new VisualElement();
+                headerContainer.style.flexDirection = FlexDirection.Row;
+                headerContainer.style.alignItems = Align.Center;
+
+                // Кнопка сворачивания/разворачивания
+                var foldoutButton = new Button(() => {});
+                foldoutButton.text = scriptExpandedStates.ContainsKey(script.name) && scriptExpandedStates[script.name] ? "▼" : "▶";
+                foldoutButton.style.width = 20;
+                foldoutButton.style.height = 20;
+                foldoutButton.style.marginRight = 5;
+                foldoutButton.style.backgroundColor = Color.clear;
+                foldoutButton.style.borderLeftWidth = 0;
+                foldoutButton.style.borderRightWidth = 0;
+                foldoutButton.style.borderTopWidth = 0;
+                foldoutButton.style.borderBottomWidth = 0;
+                headerContainer.Add(foldoutButton);
+
                 // Заголовок скрипта
                 var scriptHeader = new Label($"Script: {script.name}");
                 scriptHeader.style.unityFontStyleAndWeight = FontStyle.Bold;
                 scriptHeader.style.fontSize = 14;
-                scriptContainer.Add(scriptHeader);
+                headerContainer.Add(scriptHeader);
+
+                scriptContainer.Add(headerContainer);
+
+                // Контейнер для полей скрипта
+                var fieldsContainer = new VisualElement();
+                fieldsContainer.style.display = scriptExpandedStates.ContainsKey(script.name) && scriptExpandedStates[script.name] 
+                    ? DisplayStyle.Flex 
+                    : DisplayStyle.None;
 
                 // Поля скрипта
                 var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
@@ -1073,8 +1107,24 @@ namespace ArchitectureVisualizer
                     valueLabel.style.marginLeft = 20;
                     fieldContainer.Add(valueLabel);
 
-                    scriptContainer.Add(fieldContainer);
+                    fieldsContainer.Add(fieldContainer);
                 }
+
+                scriptContainer.Add(fieldsContainer);
+
+                // Добавляем обработчик нажатия на кнопку сворачивания
+                foldoutButton.clicked += () =>
+                {
+                    bool isExpanded = fieldsContainer.style.display == DisplayStyle.Flex;
+                    fieldsContainer.style.display = isExpanded ? DisplayStyle.None : DisplayStyle.Flex;
+                    foldoutButton.text = isExpanded ? "▶" : "▼";
+                    
+                    // Обновляем состояние скрипта
+                    scriptExpandedStates[script.name] = !isExpanded;
+                    
+                    // Пересоздаем список скриптов для обновления порядка
+                    UpdateScriptDetails();
+                };
 
                 scriptDetailsContainer.Add(scriptContainer);
             }
