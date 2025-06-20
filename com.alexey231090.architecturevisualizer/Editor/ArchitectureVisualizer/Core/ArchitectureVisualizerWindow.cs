@@ -11,6 +11,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Collections.Specialized;
+using ArchitectureVisualizer;
 
 namespace ArchitectureVisualizer
 {
@@ -20,13 +21,24 @@ namespace ArchitectureVisualizer
         private VisualElement structureContainer;
         private ScrollView tablesContainer;
         private ScrollView scriptDetailsContainer;
+        private ScrollView eventTrackingContainer;
         private DependencyData dependencyData = new DependencyData();
-        private string selectedFolder = "Assets"; // По умолчанию анализируем всю папку Assets
-        private Label pathLabel; // Добавляем поле для метки пути
+        private string selectedFolder = "Assets";
+        private Label pathLabel;
         
         // Добавляем словарь для отслеживания состояния скриптов
         private Dictionary<string, bool> scriptExpandedStates = new Dictionary<string, bool>();
         private List<string> scriptOrder = new List<string>();
+
+        // Добавляем данные для Event Tracking
+        private List<TrackingPath> trackingPaths = new List<TrackingPath>();
+        private Dictionary<string, bool> pathTrackingStates = new Dictionary<string, bool>();
+
+        private bool isGlobalTrackingActive = false;
+        private double lastUpdateTime = 0;
+        private const double updateInterval = 0.5; // Обновлять значения раз в 0.5 сек
+
+        private string selectedScriptName;
 
         private void OnEnable()
         {
@@ -47,40 +59,33 @@ namespace ArchitectureVisualizer
 
         private void CreateGUI()
         {
-            Debug.Log("Starting CreateGUI...");
+            Debug.Log("Creating GUI...");
             var rootVisualElement = this.rootVisualElement;
             
-            // Очищаем существующие элементы
+            // Очищаем корневой элемент перед созданием нового UI
             rootVisualElement.Clear();
             
-            // Добавляем стили
-            rootVisualElement.styleSheets.Add(AssetDatabase.LoadAssetAtPath<StyleSheet>("Packages/com.alexey231090.architecturevisualizer/Editor/ArchitectureVisualizer/Resources/styles.uss"));
+            rootVisualElement.style.flexDirection = FlexDirection.Column;
 
             // Создаем контейнер для кнопок
             var buttonContainer = new VisualElement();
             buttonContainer.style.flexDirection = FlexDirection.Row;
-            buttonContainer.style.alignItems = Align.Center;
+            buttonContainer.style.marginTop = 10;
+            buttonContainer.style.marginRight = 10;
             buttonContainer.style.marginBottom = 10;
-            buttonContainer.style.paddingTop = 10;
-            buttonContainer.style.paddingRight = 10;
-            buttonContainer.style.paddingBottom = 10;
-            buttonContainer.style.paddingLeft = 10;
+            buttonContainer.style.marginLeft = 10;
 
-            // Кнопка анализа проекта (слева)
-            var analyzeButton = new Button(() => AnalyzeProject()) { text = "Analyze Project" };
-            analyzeButton.style.width = 150;
-            analyzeButton.style.backgroundColor = new Color(0.4f, 0.5f, 0.3f);
-            analyzeButton.style.color = Color.white;
+            var analyzeButton = new Button(() => AnalyzeProject());
+            analyzeButton.text = "Analyze Project";
+            analyzeButton.style.marginRight = 10;
+            analyzeButton.style.backgroundColor = new Color(0.2f, 0.6f, 0.2f);
             buttonContainer.Add(analyzeButton);
 
-            // Кнопка выбора папки (после кнопки анализа)
-            var openFolderButton = new Button(() => OpenProjectFolder()) { text = "Select Folder" };
-            openFolderButton.style.width = 150;
-            openFolderButton.style.backgroundColor = new Color(0.3f, 0.4f, 0.5f);
-            openFolderButton.style.color = Color.white;
-            buttonContainer.Add(openFolderButton);
+            var folderButton = new Button(() => SelectFolder());
+            folderButton.text = "Select Folder";
+            folderButton.style.marginRight = 10;
+            buttonContainer.Add(folderButton);
 
-            // Метка с текущим путем (после кнопки выбора папки)
             pathLabel = new Label($"Current path: {selectedFolder}");
             pathLabel.style.marginLeft = 10;
             pathLabel.style.marginRight = 10;
@@ -119,42 +124,17 @@ namespace ArchitectureVisualizer
             scriptDetailsTab.SetContent(scriptDetailsContainer);
             tabView.AddTab(scriptDetailsTab);
 
+            // Добавляем новую вкладку для Event Tracking (четвертая)
+            var eventTrackingTab = new Tab("Event Tracking");
+            eventTrackingContainer = new ScrollView();
+            eventTrackingContainer.style.flexGrow = 1;
+            eventTrackingTab.SetContent(eventTrackingContainer);
+            tabView.AddTab(eventTrackingTab);
+
             Debug.Log($"Created {tabView.childCount} tabs");
             foreach (var tab in tabView.Children())
             {
-                if (tab is Tab tabElement)
-                {
-                    Debug.Log($"Tab: {tabElement.text}, Content: {tabElement.content != null}");
-                }
-            }
-
-            // Выбираем первую вкладку по умолчанию
-            if (tabView.childCount > 0)
-            {
-                var firstTab = tabView.ElementAt(0) as Tab;
-                if (firstTab != null)
-                {
-                    firstTab.AddToClassList("unity-tab--selected");
-                    firstTab.MarkDirtyRepaint();
-                }
-            }
-
-            // Принудительно обновляем окно
-            rootVisualElement.MarkDirtyRepaint();
-            Debug.Log("GUI creation completed");
-        }
-
-        private void SelectFolder()
-        {
-            string path = EditorUtility.OpenFolderPanel("Select Folder", selectedFolder, "");
-            if (!string.IsNullOrEmpty(path))
-            {
-                // Преобразуем путь в относительный путь Unity
-                string relativePath = "Assets" + path.Substring(Application.dataPath.Length);
-                selectedFolder = relativePath;
-                Debug.Log($"Selected folder: {selectedFolder}");
-                // Обновляем метку пути
-                pathLabel.text = $"Current path: {selectedFolder}";
+                Debug.Log($"Tab: {tab}");
             }
         }
 
@@ -163,34 +143,27 @@ namespace ArchitectureVisualizer
             Debug.Log("Starting project analysis...");
             try
             {
-                // Сохраняем текущую вкладку
                 var currentTab = tabView.Q<Tab>(className: "unity-tab--selected");
                 int currentTabIndex = currentTab != null ? tabView.IndexOf(currentTab) : -1;
-
-                // Если вкладка не выбрана или выбрана неправильно, выбираем Tables
                 if (currentTabIndex == -1 || currentTabIndex >= tabView.childCount)
                 {
-                    currentTabIndex = 0; // Индекс вкладки Tables
+                    currentTabIndex = 0;
                 }
-
-                // Анализируем скрипты
-                AnalyzeScriptsInFolder(selectedFolder);
-
-                // Обновляем все вкладки
+                // Анализируем скрипты и зависимости
+                DependencyAnalyzer.AnalyzeScriptsInFolder(selectedFolder);
+                dependencyData = new DependencyData();
+                DependencyAnalyzer.CollectDependencyData(selectedFolder, dependencyData);
+                // Обновляем UI вкладок
                 UpdateTables();
                 UpdateStructure();
                 UpdateScriptDetails();
-
-                // Восстанавливаем выбранную вкладку
+                UpdateEventTracking();
                 if (currentTabIndex >= 0 && currentTabIndex < tabView.childCount)
                 {
-                    // Сначала убираем класс у всех вкладок
                     foreach (var tab in tabView.Children())
                     {
                         tab.RemoveFromClassList("unity-tab--selected");
                     }
-                    
-                    // Затем добавляем класс к нужной вкладке
                     var tabToSelect = tabView.ElementAt(currentTabIndex) as Tab;
                     if (tabToSelect != null)
                     {
@@ -198,1121 +171,16 @@ namespace ArchitectureVisualizer
                         tabToSelect.MarkDirtyRepaint();
                     }
                 }
-
                 Debug.Log("Project analysis completed successfully.");
             }
             catch (Exception ex)
             {
                 Debug.LogError($"Error during project analysis: {ex.Message}");
-                EditorUtility.DisplayDialog("Analysis Error", 
-                    "An error occurred during project analysis. Check the console for details.", "OK");
+                EditorUtility.DisplayDialog("Analysis Error", "An error occurred during project analysis. Check the console for details.", "OK");
             }
         }
 
-        private void AnalyzeScriptsInFolder(string folderPath)
-        {
-            Debug.Log($"Analyzing scripts in folder: {folderPath}");
-            try
-            {
-                // Получаем все скрипты в выбранной папке
-                string[] scriptGuids = AssetDatabase.FindAssets("t:Script", new[] { folderPath });
-                foreach (string guid in scriptGuids)
-                {
-                    string path = AssetDatabase.GUIDToAssetPath(guid);
-                    if (!string.IsNullOrEmpty(path))
-                    {
-                        Debug.Log($"Found script: {path}");
-                        // Здесь можно добавить дополнительный анализ скрипта
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error analyzing scripts: {ex.Message}");
-                throw;
-            }
-        }
-
-        private void UpdateTables()
-        {
-            tablesContainer.Clear();
-            CollectDependencyData();
-
-            // Создаем таблицы для разных типов зависимостей
-            CreateEventsTable();
-            CreateHardDependenciesTable();
-            CreateDITable();
-            CreateScriptableObjectTable();
-            CreateSingletonTable();
-            CreateMessageBusTable();
-        }
-
-        private void CollectDependencyData()
-        {
-            // Очищаем предыдущие данные
-            dependencyData = new DependencyData();
-
-            // Получаем все скрипты в выбранной папке
-            string[] scriptGuids = AssetDatabase.FindAssets("t:Script", new[] { selectedFolder });
-            foreach (var guid in scriptGuids)
-            {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (path.Contains("Packages/") || path.Contains("Library/")) continue;
-
-                var script = AssetDatabase.LoadAssetAtPath<MonoScript>(path);
-                if (script == null) continue;
-
-                var type = script.GetClass();
-                if (type == null) continue;
-
-                // Анализируем зависимости
-                AnalyzeDependencies(type);
-            }
-        }
-
-        private void AnalyzeDependencies(System.Type type)
-        {
-            // Анализ событий
-            var events = type.GetEvents();
-            foreach (var evt in events)
-            {
-                dependencyData.Events.Add(new DependencyData.EventData
-                {
-                    Generator = type.Name,
-                    Subscriber = "Неизвестно", // Нужно анализировать подписчиков
-                    SubscriberMethod = "Неизвестно",
-                    Description = $"Событие {evt.Name}"
-                });
-            }
-
-            // Анализ полей и свойств
-            var fields = type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            foreach (var field in fields)
-            {
-                // Проверяем на GetComponent
-                if (field.FieldType.IsSubclassOf(typeof(UnityEngine.Component)))
-                {
-                    dependencyData.HardDependencies.Add(new DependencyData.HardDependencyData
-                    {
-                        Consumer = type.Name,
-                        Dependency = field.FieldType.Name,
-                        AccessMethod = "GetComponent",
-                        Risks = "Зависимость от компонента"
-                    });
-                }
-                // Проверяем на ScriptableObject
-                else if (field.FieldType.IsSubclassOf(typeof(UnityEngine.ScriptableObject)))
-                {
-                    dependencyData.ScriptableObjects.Add(new DependencyData.ScriptableObjectData
-                    {
-                        SOObject = field.FieldType.Name,
-                        User = type.Name,
-                        MethodOrProperty = field.Name,
-                        Notes = "Поле типа ScriptableObject"
-                    });
-                }
-            }
-
-            // Анализ атрибутов
-            var attributes = type.GetCustomAttributes(true);
-            foreach (var attr in attributes)
-            {
-                // Проверяем на Singleton
-                if (attr.GetType().Name.Contains("Singleton"))
-                {
-                    dependencyData.Singletons.Add(new DependencyData.SingletonData
-                    {
-                        SingletonClass = type.Name,
-                        User = "Неизвестно",
-                        AccessMethod = "Instance",
-                        Problems = "Глобальное состояние"
-                    });
-                }
-            }
-
-            // Анализ интерфейсов для DI
-            var interfaces = type.GetInterfaces();
-            foreach (var iface in interfaces)
-            {
-                dependencyData.Dependencies.Add(new DependencyData.DIData
-                {
-                    Class = type.Name,
-                    Interface = iface.Name,
-                    InjectionMethod = "Constructor/Field",
-                    Notes = "Реализация интерфейса"
-                });
-            }
-
-            // Анализ сообщений
-            var methods = type.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            foreach (var method in methods)
-            {
-                if (method.Name.Contains("Send") || method.Name.Contains("Publish"))
-                {
-                    dependencyData.Messages.Add(new DependencyData.MessageData
-                    {
-                        Sender = type.Name,
-                        Receiver = "Неизвестно",
-                        MessageType = method.Name,
-                        Notes = "Отправка сообщения"
-                    });
-                }
-                else if (method.Name.Contains("Receive") || method.Name.Contains("Subscribe"))
-                {
-                    dependencyData.Messages.Add(new DependencyData.MessageData
-                    {
-                        Sender = "Неизвестно",
-                        Receiver = type.Name,
-                        MessageType = method.Name,
-                        Notes = "Получение сообщения"
-                    });
-                }
-            }
-        }
-
-        private void CreateEventsTable()
-        {
-            var container = new VisualElement();
-            container.style.marginBottom = 20;
-
-            // Заголовок
-            var header = new Label("1. Таблица для событий (Events / UnityEvent)");
-            header.style.unityFontStyleAndWeight = FontStyle.Bold;
-            header.style.fontSize = 16;
-            header.style.marginBottom = 10;
-            container.Add(header);
-
-            // Создаем таблицу
-            var table = new VisualElement();
-            table.style.flexDirection = FlexDirection.Column;
-            table.style.borderLeftWidth = 1;
-            table.style.borderRightWidth = 1;
-            table.style.borderTopWidth = 1;
-            table.style.borderBottomWidth = 1;
-            table.style.borderLeftColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderRightColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderTopColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.width = new Length(100, LengthUnit.Percent);
-            table.style.minWidth = 800; // Минимальная ширина таблицы
-
-            // Заголовки столбцов
-            var headerRow = new VisualElement();
-            headerRow.style.flexDirection = FlexDirection.Row;
-            headerRow.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f);
-            headerRow.style.paddingTop = 5;
-            headerRow.style.paddingRight = 5;
-            headerRow.style.paddingBottom = 5;
-            headerRow.style.paddingLeft = 5;
-            headerRow.style.width = new Length(100, LengthUnit.Percent);
-
-            string[] headers = { "Генератор", "Подписчик", "Метод подписчика", "Описание" };
-            float[] columnWidths = { 20, 20, 20, 40 }; // Процентные значения ширины колонок
-            foreach (var i in Enumerable.Range(0, headers.Length))
-            {
-                var headerCell = new Label(headers[i]);
-                headerCell.style.width = new Length(columnWidths[i], LengthUnit.Percent);
-                headerCell.style.minWidth = 150; // Минимальная ширина ячейки
-                headerCell.style.unityFontStyleAndWeight = FontStyle.Bold;
-                headerCell.style.paddingTop = 5;
-                headerCell.style.paddingRight = 5;
-                headerCell.style.paddingBottom = 5;
-                headerCell.style.paddingLeft = 5;
-                headerCell.style.whiteSpace = WhiteSpace.Normal;
-                headerCell.style.overflow = Overflow.Hidden;
-                headerCell.style.textOverflow = TextOverflow.Ellipsis;
-                headerRow.Add(headerCell);
-            }
-            table.Add(headerRow);
-
-            // Добавляем строки с данными
-            foreach (var evt in dependencyData.Events)
-            {
-                var row = new VisualElement();
-                row.style.flexDirection = FlexDirection.Row;
-                row.style.paddingTop = 5;
-                row.style.paddingRight = 5;
-                row.style.paddingBottom = 5;
-                row.style.paddingLeft = 5;
-                row.style.borderBottomWidth = 1;
-                row.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
-                row.style.width = new Length(100, LengthUnit.Percent);
-
-                // Добавляем ячейки с фиксированной шириной
-                AddCell(row, evt.Generator, columnWidths[0]);
-                AddCell(row, evt.Subscriber, columnWidths[1]);
-                AddCell(row, evt.SubscriberMethod, columnWidths[2]);
-                AddCell(row, evt.Description, columnWidths[3]);
-
-                table.Add(row);
-            }
-
-            // Добавляем таблицу в контейнер
-            container.Add(table);
-            tablesContainer.Add(container);
-        }
-
-        private void CreateHardDependenciesTable()
-        {
-            var container = new VisualElement();
-            container.style.marginBottom = 20;
-
-            // Заголовок
-            var header = new Label("2. Таблица для жёстких зависимостей (GetComponent, FindObjectOfType)");
-            header.style.unityFontStyleAndWeight = FontStyle.Bold;
-            header.style.fontSize = 16;
-            header.style.marginBottom = 10;
-            container.Add(header);
-
-            // Создаем таблицу
-            var table = new VisualElement();
-            table.style.flexDirection = FlexDirection.Column;
-            table.style.borderLeftWidth = 1;
-            table.style.borderRightWidth = 1;
-            table.style.borderTopWidth = 1;
-            table.style.borderBottomWidth = 1;
-            table.style.borderLeftColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderRightColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderTopColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.width = new Length(100, LengthUnit.Percent);
-            table.style.minWidth = 800;
-
-            // Заголовки столбцов
-            var headerRow = new VisualElement();
-            headerRow.style.flexDirection = FlexDirection.Row;
-            headerRow.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f);
-            headerRow.style.paddingTop = 5;
-            headerRow.style.paddingRight = 5;
-            headerRow.style.paddingBottom = 5;
-            headerRow.style.paddingLeft = 5;
-            headerRow.style.width = new Length(100, LengthUnit.Percent);
-
-            string[] headers = { "Потребитель", "Зависимость", "Метод доступа", "Риски" };
-            float[] columnWidths = { 25, 25, 25, 25 }; // Равномерное распределение
-            foreach (var i in Enumerable.Range(0, headers.Length))
-            {
-                var headerCell = new Label(headers[i]);
-                headerCell.style.width = new Length(columnWidths[i], LengthUnit.Percent);
-                headerCell.style.minWidth = 150;
-                headerCell.style.unityFontStyleAndWeight = FontStyle.Bold;
-                headerCell.style.paddingTop = 5;
-                headerCell.style.paddingRight = 5;
-                headerCell.style.paddingBottom = 5;
-                headerCell.style.paddingLeft = 5;
-                headerCell.style.whiteSpace = WhiteSpace.Normal;
-                headerCell.style.overflow = Overflow.Hidden;
-                headerCell.style.textOverflow = TextOverflow.Ellipsis;
-                headerRow.Add(headerCell);
-            }
-            table.Add(headerRow);
-
-            // Добавляем строки с данными
-            foreach (var dep in dependencyData.HardDependencies)
-            {
-                var row = new VisualElement();
-                row.style.flexDirection = FlexDirection.Row;
-                row.style.paddingTop = 5;
-                row.style.paddingRight = 5;
-                row.style.paddingBottom = 5;
-                row.style.paddingLeft = 5;
-                row.style.borderBottomWidth = 1;
-                row.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
-                row.style.width = new Length(100, LengthUnit.Percent);
-
-                AddCell(row, dep.Consumer, columnWidths[0]);
-                AddCell(row, dep.Dependency, columnWidths[1]);
-                AddCell(row, dep.AccessMethod, columnWidths[2]);
-                AddCell(row, dep.Risks, columnWidths[3]);
-
-                table.Add(row);
-            }
-
-            container.Add(table);
-            tablesContainer.Add(container);
-        }
-
-        private void ToggleGroup(VisualElement groupHeader)
-        {
-            var groupContainer = groupHeader.parent.Children().ElementAt(groupHeader.parent.IndexOf(groupHeader) + 1);
-            var toggleButton = (Button)groupHeader.Children().First();
-            
-            if (groupContainer.style.display == DisplayStyle.None)
-            {
-                groupContainer.style.display = DisplayStyle.Flex;
-                toggleButton.text = "▼";
-            }
-            else
-            {
-                groupContainer.style.display = DisplayStyle.None;
-                toggleButton.text = "▶";
-            }
-        }
-
-        private void SortTable(VisualElement table, string columnName)
-        {
-            // Получаем все группы (пропускаем заголовок таблицы)
-            var groups = table.Children().Skip(1).Where((_, index) => index % 2 == 0).ToList();
-            var groupContainers = table.Children().Skip(1).Where((_, index) => index % 2 == 1).ToList();
-
-            for (int i = 0; i < groups.Count; i++)
-            {
-                var groupContainer = groupContainers[i];
-                var rows = groupContainer.Children().ToList();
-                
-                var sortedRows = rows.OrderBy(row => 
-                {
-                    var cells = row.Children().ToList();
-                    switch (columnName)
-                    {
-                        case "Класс-потребитель":
-                            return ((Label)cells[0]).text;
-                        case "Зависимость":
-                            return ((Label)cells[1]).text;
-                        case "Как получает":
-                            return ((Label)cells[2]).text;
-                        default:
-                            return "";
-                    }
-                }).ToList();
-
-                // Очищаем контейнер группы
-                foreach (var row in rows)
-                {
-                    groupContainer.Remove(row);
-                }
-
-                // Добавляем отсортированные строки
-                foreach (var row in sortedRows)
-                {
-                    groupContainer.Add(row);
-                }
-            }
-        }
-
-        private void AddCell(VisualElement row, string text, float widthPercent)
-        {
-            var cell = new Label(text);
-            cell.style.width = new Length(widthPercent, LengthUnit.Percent);
-            cell.style.minWidth = 150;
-            cell.style.paddingTop = 5;
-            cell.style.paddingRight = 5;
-            cell.style.paddingBottom = 5;
-            cell.style.paddingLeft = 5;
-            cell.style.whiteSpace = WhiteSpace.Normal;
-            cell.style.overflow = Overflow.Hidden;
-            cell.style.textOverflow = TextOverflow.Ellipsis;
-            row.Add(cell);
-        }
-
-        private void CreateDITable()
-        {
-            var container = new VisualElement();
-            container.style.marginBottom = 20;
-
-            // Заголовок
-            var header = new Label("3. Таблица для внедрения зависимостей (DI)");
-            header.style.unityFontStyleAndWeight = FontStyle.Bold;
-            header.style.fontSize = 16;
-            header.style.marginBottom = 10;
-            container.Add(header);
-
-            // Создаем таблицу
-            var table = new VisualElement();
-            table.style.flexDirection = FlexDirection.Column;
-            table.style.borderLeftWidth = 1;
-            table.style.borderRightWidth = 1;
-            table.style.borderTopWidth = 1;
-            table.style.borderBottomWidth = 1;
-            table.style.borderLeftColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderRightColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderTopColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.width = new Length(100, LengthUnit.Percent);
-            table.style.minWidth = 800;
-
-            // Заголовки столбцов
-            var headerRow = new VisualElement();
-            headerRow.style.flexDirection = FlexDirection.Row;
-            headerRow.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f);
-            headerRow.style.paddingTop = 5;
-            headerRow.style.paddingRight = 5;
-            headerRow.style.paddingBottom = 5;
-            headerRow.style.paddingLeft = 5;
-            headerRow.style.width = new Length(100, LengthUnit.Percent);
-
-            string[] headers = { "Класс", "Интерфейс", "Метод внедрения", "Примечания" };
-            float[] columnWidths = { 25, 25, 25, 25 }; // Равномерное распределение
-            foreach (var i in Enumerable.Range(0, headers.Length))
-            {
-                var headerCell = new Label(headers[i]);
-                headerCell.style.width = new Length(columnWidths[i], LengthUnit.Percent);
-                headerCell.style.minWidth = 150;
-                headerCell.style.unityFontStyleAndWeight = FontStyle.Bold;
-                headerCell.style.paddingTop = 5;
-                headerCell.style.paddingRight = 5;
-                headerCell.style.paddingBottom = 5;
-                headerCell.style.paddingLeft = 5;
-                headerCell.style.whiteSpace = WhiteSpace.Normal;
-                headerCell.style.overflow = Overflow.Hidden;
-                headerCell.style.textOverflow = TextOverflow.Ellipsis;
-                headerRow.Add(headerCell);
-            }
-            table.Add(headerRow);
-
-            // Добавляем строки с данными
-            foreach (var di in dependencyData.Dependencies)
-            {
-                var row = new VisualElement();
-                row.style.flexDirection = FlexDirection.Row;
-                row.style.paddingTop = 5;
-                row.style.paddingRight = 5;
-                row.style.paddingBottom = 5;
-                row.style.paddingLeft = 5;
-                row.style.borderBottomWidth = 1;
-                row.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
-                row.style.width = new Length(100, LengthUnit.Percent);
-
-                AddCell(row, di.Class, columnWidths[0]);
-                AddCell(row, di.Interface, columnWidths[1]);
-                AddCell(row, di.InjectionMethod, columnWidths[2]);
-                AddCell(row, di.Notes, columnWidths[3]);
-
-                table.Add(row);
-            }
-
-            container.Add(table);
-            tablesContainer.Add(container);
-        }
-
-        private void CreateScriptableObjectTable()
-        {
-            var container = new VisualElement();
-            container.style.marginBottom = 20;
-
-            // Заголовок
-            var header = new Label("4. Таблица для ScriptableObject");
-            header.style.unityFontStyleAndWeight = FontStyle.Bold;
-            header.style.fontSize = 16;
-            header.style.marginBottom = 10;
-            container.Add(header);
-
-            // Создаем таблицу
-            var table = new VisualElement();
-            table.style.flexDirection = FlexDirection.Column;
-            table.style.borderLeftWidth = 1;
-            table.style.borderRightWidth = 1;
-            table.style.borderTopWidth = 1;
-            table.style.borderBottomWidth = 1;
-            table.style.borderLeftColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderRightColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderTopColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.width = new Length(100, LengthUnit.Percent);
-            table.style.minWidth = 800;
-
-            // Заголовки столбцов
-            var headerRow = new VisualElement();
-            headerRow.style.flexDirection = FlexDirection.Row;
-            headerRow.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f);
-            headerRow.style.paddingTop = 5;
-            headerRow.style.paddingRight = 5;
-            headerRow.style.paddingBottom = 5;
-            headerRow.style.paddingLeft = 5;
-            headerRow.style.width = new Length(100, LengthUnit.Percent);
-
-            string[] headers = { "ScriptableObject", "Использование", "Метод/Свойство", "Примечания" };
-            float[] columnWidths = { 25, 25, 25, 25 }; // Равномерное распределение
-            foreach (var i in Enumerable.Range(0, headers.Length))
-            {
-                var headerCell = new Label(headers[i]);
-                headerCell.style.width = new Length(columnWidths[i], LengthUnit.Percent);
-                headerCell.style.minWidth = 150;
-                headerCell.style.unityFontStyleAndWeight = FontStyle.Bold;
-                headerCell.style.paddingTop = 5;
-                headerCell.style.paddingRight = 5;
-                headerCell.style.paddingBottom = 5;
-                headerCell.style.paddingLeft = 5;
-                headerCell.style.whiteSpace = WhiteSpace.Normal;
-                headerCell.style.overflow = Overflow.Hidden;
-                headerCell.style.textOverflow = TextOverflow.Ellipsis;
-                headerRow.Add(headerCell);
-            }
-            table.Add(headerRow);
-
-            // Добавляем строки с данными
-            foreach (var so in dependencyData.ScriptableObjects)
-            {
-                var row = new VisualElement();
-                row.style.flexDirection = FlexDirection.Row;
-                row.style.paddingTop = 5;
-                row.style.paddingRight = 5;
-                row.style.paddingBottom = 5;
-                row.style.paddingLeft = 5;
-                row.style.borderBottomWidth = 1;
-                row.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
-                row.style.width = new Length(100, LengthUnit.Percent);
-
-                AddCell(row, so.SOObject, columnWidths[0]);
-                AddCell(row, so.User, columnWidths[1]);
-                AddCell(row, so.MethodOrProperty, columnWidths[2]);
-                AddCell(row, so.Notes, columnWidths[3]);
-
-                table.Add(row);
-            }
-
-            container.Add(table);
-            tablesContainer.Add(container);
-        }
-
-        private void CreateSingletonTable()
-        {
-            var container = new VisualElement();
-            container.style.marginBottom = 20;
-
-            // Заголовок
-            var header = new Label("5. Таблица для Singleton");
-            header.style.unityFontStyleAndWeight = FontStyle.Bold;
-            header.style.fontSize = 16;
-            header.style.marginBottom = 10;
-            container.Add(header);
-
-            // Создаем таблицу
-            var table = new VisualElement();
-            table.style.flexDirection = FlexDirection.Column;
-            table.style.borderLeftWidth = 1;
-            table.style.borderRightWidth = 1;
-            table.style.borderTopWidth = 1;
-            table.style.borderBottomWidth = 1;
-            table.style.borderLeftColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderRightColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderTopColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.width = new Length(100, LengthUnit.Percent);
-            table.style.minWidth = 800;
-
-            // Заголовки столбцов
-            var headerRow = new VisualElement();
-            headerRow.style.flexDirection = FlexDirection.Row;
-            headerRow.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f);
-            headerRow.style.paddingTop = 5;
-            headerRow.style.paddingRight = 5;
-            headerRow.style.paddingBottom = 5;
-            headerRow.style.paddingLeft = 5;
-            headerRow.style.width = new Length(100, LengthUnit.Percent);
-
-            string[] headers = { "Singleton", "Использование", "Метод доступа", "Проблемы" };
-            float[] columnWidths = { 25, 25, 25, 25 }; // Равномерное распределение
-            foreach (var i in Enumerable.Range(0, headers.Length))
-            {
-                var headerCell = new Label(headers[i]);
-                headerCell.style.width = new Length(columnWidths[i], LengthUnit.Percent);
-                headerCell.style.minWidth = 150;
-                headerCell.style.unityFontStyleAndWeight = FontStyle.Bold;
-                headerCell.style.paddingTop = 5;
-                headerCell.style.paddingRight = 5;
-                headerCell.style.paddingBottom = 5;
-                headerCell.style.paddingLeft = 5;
-                headerCell.style.whiteSpace = WhiteSpace.Normal;
-                headerCell.style.overflow = Overflow.Hidden;
-                headerCell.style.textOverflow = TextOverflow.Ellipsis;
-                headerRow.Add(headerCell);
-            }
-            table.Add(headerRow);
-
-            // Добавляем строки с данными
-            foreach (var singleton in dependencyData.Singletons)
-            {
-                var row = new VisualElement();
-                row.style.flexDirection = FlexDirection.Row;
-                row.style.paddingTop = 5;
-                row.style.paddingRight = 5;
-                row.style.paddingBottom = 5;
-                row.style.paddingLeft = 5;
-                row.style.borderBottomWidth = 1;
-                row.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
-                row.style.width = new Length(100, LengthUnit.Percent);
-
-                AddCell(row, singleton.SingletonClass, columnWidths[0]);
-                AddCell(row, singleton.User, columnWidths[1]);
-                AddCell(row, singleton.AccessMethod, columnWidths[2]);
-                AddCell(row, singleton.Problems, columnWidths[3]);
-
-                table.Add(row);
-            }
-
-            container.Add(table);
-            tablesContainer.Add(container);
-        }
-
-        private void CreateMessageBusTable()
-        {
-            var container = new VisualElement();
-            container.style.marginBottom = 20;
-
-            // Заголовок
-            var header = new Label("6. Таблица для MessageBus");
-            header.style.unityFontStyleAndWeight = FontStyle.Bold;
-            header.style.fontSize = 16;
-            header.style.marginBottom = 10;
-            container.Add(header);
-
-            // Создаем таблицу
-            var table = new VisualElement();
-            table.style.flexDirection = FlexDirection.Column;
-            table.style.borderLeftWidth = 1;
-            table.style.borderRightWidth = 1;
-            table.style.borderTopWidth = 1;
-            table.style.borderBottomWidth = 1;
-            table.style.borderLeftColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderRightColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderTopColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
-            table.style.width = new Length(100, LengthUnit.Percent);
-            table.style.minWidth = 800;
-
-            // Заголовки столбцов
-            var headerRow = new VisualElement();
-            headerRow.style.flexDirection = FlexDirection.Row;
-            headerRow.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f);
-            headerRow.style.paddingTop = 5;
-            headerRow.style.paddingRight = 5;
-            headerRow.style.paddingBottom = 5;
-            headerRow.style.paddingLeft = 5;
-            headerRow.style.width = new Length(100, LengthUnit.Percent);
-
-            string[] headers = { "Отправитель", "Получатель", "Тип сообщения", "Примечания" };
-            float[] columnWidths = { 25, 25, 25, 25 }; // Равномерное распределение
-            foreach (var i in Enumerable.Range(0, headers.Length))
-            {
-                var headerCell = new Label(headers[i]);
-                headerCell.style.width = new Length(columnWidths[i], LengthUnit.Percent);
-                headerCell.style.minWidth = 150;
-                headerCell.style.unityFontStyleAndWeight = FontStyle.Bold;
-                headerCell.style.paddingTop = 5;
-                headerCell.style.paddingRight = 5;
-                headerCell.style.paddingBottom = 5;
-                headerCell.style.paddingLeft = 5;
-                headerCell.style.whiteSpace = WhiteSpace.Normal;
-                headerCell.style.overflow = Overflow.Hidden;
-                headerCell.style.textOverflow = TextOverflow.Ellipsis;
-                headerRow.Add(headerCell);
-            }
-            table.Add(headerRow);
-
-            // Добавляем строки с данными
-            foreach (var message in dependencyData.Messages)
-            {
-                var row = new VisualElement();
-                row.style.flexDirection = FlexDirection.Row;
-                row.style.paddingTop = 5;
-                row.style.paddingRight = 5;
-                row.style.paddingBottom = 5;
-                row.style.paddingLeft = 5;
-                row.style.borderBottomWidth = 1;
-                row.style.borderBottomColor = new Color(0.3f, 0.3f, 0.3f);
-                row.style.width = new Length(100, LengthUnit.Percent);
-
-                AddCell(row, message.Sender, columnWidths[0]);
-                AddCell(row, message.Receiver, columnWidths[1]);
-                AddCell(row, message.MessageType, columnWidths[2]);
-                AddCell(row, message.Notes, columnWidths[3]);
-
-                table.Add(row);
-            }
-
-            container.Add(table);
-            tablesContainer.Add(container);
-        }
-
-        private void UpdateStructure()
-        {
-            structureContainer.Clear();
-
-            // Получаем все префабы в выбранной папке
-            string[] prefabGuids = AssetDatabase.FindAssets("t:Prefab", new[] { selectedFolder });
-            foreach (var guid in prefabGuids)
-            {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (path.Contains("Packages/") || path.Contains("Library/")) continue;
-
-                var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(path);
-                if (prefab == null) continue;
-
-                var prefabElement = CreatePrefabElement(prefab);
-                structureContainer.Add(prefabElement);
-            }
-
-            // Получаем все сцены в выбранной папке
-            string[] sceneGuids = AssetDatabase.FindAssets("t:Scene", new[] { selectedFolder });
-            foreach (var guid in sceneGuids)
-            {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                if (path.Contains("Packages/") || path.Contains("Library/")) continue;
-
-                var scene = AssetDatabase.LoadAssetAtPath<SceneAsset>(path);
-                if (scene == null) continue;
-
-                var sceneElement = new VisualElement();
-                sceneElement.style.marginBottom = 10;
-                sceneElement.style.paddingTop = 10;
-                sceneElement.style.paddingRight = 10;
-                sceneElement.style.paddingBottom = 10;
-                sceneElement.style.paddingLeft = 10;
-                sceneElement.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f);
-
-                var sceneHeader = new Label($"Scene: {scene.name}");
-                sceneHeader.style.unityFontStyleAndWeight = FontStyle.Bold;
-                sceneHeader.style.fontSize = 14;
-                sceneElement.Add(sceneHeader);
-
-                structureContainer.Add(sceneElement);
-            }
-        }
-
-        private VisualElement CreatePrefabElement(GameObject prefab)
-        {
-            var container = new VisualElement();
-            container.style.marginBottom = 10;
-            container.style.paddingTop = 10;
-            container.style.paddingRight = 10;
-            container.style.paddingBottom = 10;
-            container.style.paddingLeft = 10;
-            container.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f);
-
-            var header = new Label($"Prefab: {prefab.name}");
-            header.style.unityFontStyleAndWeight = FontStyle.Bold;
-            header.style.fontSize = 14;
-            container.Add(header);
-
-            AddChildObjects(container, prefab.transform, 0);
-
-            return container;
-        }
-
-        private void AddChildObjects(VisualElement parent, Transform transform, int depth)
-        {
-            foreach (Transform child in transform)
-            {
-                var childElement = CreateObjectElement(child.gameObject, depth);
-                parent.Add(childElement);
-                AddChildObjects(childElement, child, depth + 1);
-            }
-        }
-
-        private VisualElement CreateObjectElement(GameObject obj, int depth)
-        {
-            var container = new VisualElement();
-            container.style.marginLeft = depth * 20;
-            container.style.paddingTop = 5;
-            container.style.paddingRight = 5;
-            container.style.paddingBottom = 5;
-            container.style.paddingLeft = 5;
-            container.style.borderLeftWidth = 1;
-            container.style.borderLeftColor = new Color(0.3f, 0.3f, 0.3f);
-
-            var label = new Label(obj.name);
-            label.style.unityFontStyleAndWeight = FontStyle.Normal;
-            container.Add(label);
-            return container;
-        }
-
-        private void UpdateScriptDetails()
-        {
-            Debug.Log("Updating Script Details...");
-            
-            if (scriptDetailsContainer == null)
-            {
-                Debug.LogError("Script Details container is null!");
-                return;
-            }
-
-            scriptDetailsContainer.Clear();
-
-            // Получаем все скрипты в выбранной папке
-            string[] scriptGuids = AssetDatabase.FindAssets("t:Script", new[] { selectedFolder });
-            Debug.Log($"Found {scriptGuids.Length} scripts in {selectedFolder}");
-
-            // Сортируем скрипты: сначала открытые, потом закрытые
-            var sortedScripts = scriptGuids
-                .Select(guid => AssetDatabase.GUIDToAssetPath(guid))
-                .Where(path => !path.Contains("Packages/") && !path.Contains("Library/"))
-                .Select(path => AssetDatabase.LoadAssetAtPath<MonoScript>(path))
-                .Where(script => script != null)
-                .OrderByDescending(script => scriptExpandedStates.ContainsKey(script.name) && scriptExpandedStates[script.name])
-                .ThenBy(script => script.name)
-                .ToList();
-
-            foreach (var script in sortedScripts)
-            {
-                var type = script.GetClass();
-                if (type == null) continue;
-
-                Debug.Log($"Processing script: {script.name}");
-
-                var scriptContainer = new VisualElement();
-                scriptContainer.style.marginBottom = 10;
-                scriptContainer.style.paddingTop = 10;
-                scriptContainer.style.paddingRight = 10;
-                scriptContainer.style.paddingBottom = 10;
-                scriptContainer.style.paddingLeft = 10;
-                scriptContainer.style.backgroundColor = new Color(0.2f, 0.2f, 0.2f);
-                scriptContainer.style.flexDirection = FlexDirection.Column;
-
-                // Создаем контейнер для заголовка и кнопки сворачивания
-                var headerContainer = new VisualElement();
-                headerContainer.style.flexDirection = FlexDirection.Row;
-                headerContainer.style.alignItems = Align.Center;
-
-                // Кнопка сворачивания/разворачивания
-                var foldoutButton = new Button(() => {});
-                foldoutButton.text = scriptExpandedStates.ContainsKey(script.name) && scriptExpandedStates[script.name] ? "▼" : "▶";
-                foldoutButton.style.width = 20;
-                foldoutButton.style.height = 20;
-                foldoutButton.style.marginRight = 5;
-                foldoutButton.style.backgroundColor = Color.clear;
-                foldoutButton.style.borderLeftWidth = 0;
-                foldoutButton.style.borderRightWidth = 0;
-                foldoutButton.style.borderTopWidth = 0;
-                foldoutButton.style.borderBottomWidth = 0;
-                headerContainer.Add(foldoutButton);
-
-                // Заголовок скрипта
-                var scriptHeader = new Label($"Script: {script.name}");
-                scriptHeader.style.unityFontStyleAndWeight = FontStyle.Bold;
-                scriptHeader.style.fontSize = 14;
-                headerContainer.Add(scriptHeader);
-
-                scriptContainer.Add(headerContainer);
-
-                // Контейнер для полей скрипта
-                var fieldsContainer = new VisualElement();
-                fieldsContainer.style.display = scriptExpandedStates.ContainsKey(script.name) && scriptExpandedStates[script.name] 
-                    ? DisplayStyle.Flex 
-                    : DisplayStyle.None;
-
-                // Поля скрипта
-                var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-                foreach (var field in fields)
-                {
-                    var fieldContainer = new VisualElement();
-                    fieldContainer.style.marginTop = 5;
-                    fieldContainer.style.marginLeft = 20;
-
-                    var fieldLabel = new Label($"{field.Name} ({field.FieldType.Name})");
-                    fieldLabel.style.unityFontStyleAndWeight = FontStyle.Normal;
-                    fieldContainer.Add(fieldLabel);
-
-                    var valueLabel = new Label($"Value: {GetFieldValue(field, type)}");
-                    valueLabel.style.marginLeft = 20;
-                    fieldContainer.Add(valueLabel);
-
-                    fieldsContainer.Add(fieldContainer);
-                }
-
-                scriptContainer.Add(fieldsContainer);
-
-                // Добавляем обработчик нажатия на кнопку сворачивания
-                foldoutButton.clicked += () =>
-                {
-                    bool isExpanded = fieldsContainer.style.display == DisplayStyle.Flex;
-                    fieldsContainer.style.display = isExpanded ? DisplayStyle.None : DisplayStyle.Flex;
-                    foldoutButton.text = isExpanded ? "▶" : "▼";
-                    
-                    // Обновляем состояние скрипта
-                    scriptExpandedStates[script.name] = !isExpanded;
-                    
-                    // Пересоздаем список скриптов для обновления порядка
-                    UpdateScriptDetails();
-                };
-
-                scriptDetailsContainer.Add(scriptContainer);
-            }
-
-            scriptDetailsContainer.MarkDirtyRepaint();
-            Debug.Log("Script Details updated successfully");
-        }
-
-        private string GetFieldValue(FieldInfo field, Type type)
-        {
-            try
-            {
-                if (type == null || field == null)
-                    return "N/A";
-
-                // Проверяем, является ли поле частью вложенного типа
-                if (field.DeclaringType != type)
-                {
-                    return $"Type: {field.FieldType.Name} (from {field.DeclaringType.Name})";
-                }
-
-                // Для MonoBehaviour ищем объекты на сцене
-                if (typeof(MonoBehaviour).IsAssignableFrom(type))
-                {
-                    var objects = UnityEngine.Object.FindObjectsOfType(type);
-                    if (objects != null && objects.Length > 0)
-                    {
-                        var obj = objects[0];
-                        var value = field.GetValue(obj);
-                        if (value != null)
-                        {
-                            if (value is UnityEngine.Object unityObj)
-                            {
-                                return unityObj.name;
-                            }
-                            else if (value is Array array)
-                            {
-                                var elements = new List<string>();
-                                for (int i = 0; i < array.Length; i++)
-                                {
-                                    var element = array.GetValue(i);
-                                    elements.Add(element?.ToString() ?? "null");
-                                }
-                                return $"Array[{array.Length}]: [{string.Join(", ", elements)}]";
-                            }
-                            else if (value is System.Collections.IList list)
-                            {
-                                var elements = new List<string>();
-                                foreach (var item in list)
-                                {
-                                    elements.Add(item?.ToString() ?? "null");
-                                }
-                                return $"List[{list.Count}]: [{string.Join(", ", elements)}]";
-                            }
-                            else if (value is System.Collections.IDictionary dict)
-                            {
-                                var elements = new List<string>();
-                                foreach (var entry in dict)
-                                {
-                                    var keyValue = (KeyValuePair<object, object>)entry;
-                                    elements.Add($"{keyValue.Key}: {keyValue.Value}");
-                                }
-                                return $"Dictionary[{dict.Count}]: [{string.Join(", ", elements)}]";
-                            }
-                            else
-                            {
-                                return value.ToString();
-                            }
-                        }
-                        return "null";
-                    }
-                    return $"Type: {type.Name} (MonoBehaviour)";
-                }
-
-                // Для остальных типов создаем экземпляр
-                try
-                {
-                    object instance;
-                    
-                    // Если тип вложенный, создаем экземпляр внешнего типа
-                    if (type.IsNested)
-                    {
-                        var outerType = type.DeclaringType;
-                        if (typeof(MonoBehaviour).IsAssignableFrom(outerType))
-                        {
-                            return $"Type: {type.Name} (Nested in MonoBehaviour)";
-                        }
-                        var outerInstance = Activator.CreateInstance(outerType);
-                        instance = Activator.CreateInstance(type, BindingFlags.NonPublic | BindingFlags.Instance, null, new object[] { outerInstance }, null);
-                    }
-                    else
-                    {
-                        instance = Activator.CreateInstance(type);
-                    }
-
-                    var value = field.GetValue(instance);
-                    
-                    if (value == null)
-                        return "null";
-
-                    // Обработка специальных типов
-                    if (value is UnityEngine.Object unityObj)
-                    {
-                        return unityObj.name;
-                    }
-                    else if (value is Array array)
-                    {
-                        var elements = new List<string>();
-                        for (int i = 0; i < array.Length; i++)
-                        {
-                            var element = array.GetValue(i);
-                            elements.Add(element?.ToString() ?? "null");
-                        }
-                        return $"Array[{array.Length}]: [{string.Join(", ", elements)}]";
-                    }
-                    else if (value is System.Collections.IList list)
-                    {
-                        var elements = new List<string>();
-                        foreach (var item in list)
-                        {
-                            elements.Add(item?.ToString() ?? "null");
-                        }
-                        return $"List[{list.Count}]: [{string.Join(", ", elements)}]";
-                    }
-                    else if (value is System.Collections.IDictionary dict)
-                    {
-                        var elements = new List<string>();
-                        foreach (var entry in dict)
-                        {
-                            var keyValue = (KeyValuePair<object, object>)entry;
-                            elements.Add($"{keyValue.Key}: {keyValue.Value}");
-                        }
-                        return $"Dictionary[{dict.Count}]: [{string.Join(", ", elements)}]";
-                    }
-                    else if (value is System.Enum enumValue)
-                    {
-                        return enumValue.ToString();
-                    }
-                    else if (value is System.ValueType)
-                    {
-                        return value.ToString();
-                    }
-                    else if (type.IsPrimitive || type == typeof(string))
-                    {
-                        return value.ToString();
-                    }
-                    else
-                    {
-                        return value.ToString();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogWarning($"Failed to create instance of {type.Name}: {ex.Message}");
-                    
-                    // Если не удалось создать экземпляр, возвращаем информацию о типе
-                    if (type.IsPrimitive || type == typeof(string) || type.IsEnum)
-                    {
-                        return $"Type: {type.Name}";
-                    }
-                    else if (type.IsArray)
-                    {
-                        return $"Array of {type.GetElementType().Name}";
-                    }
-                    else if (type.IsGenericType)
-                    {
-                        var genericArgs = type.GetGenericArguments();
-                        var typeNames = string.Join(", ", genericArgs.Select(t => t.Name));
-                        return $"Generic<{typeNames}>";
-                    }
-                    else if (type.IsNested)
-                    {
-                        return $"Nested Type: {type.Name} in {type.DeclaringType.Name}";
-                    }
-                    else
-                    {
-                        return $"Type: {type.Name}";
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"Warning getting field value for {field?.Name}: {ex.Message}");
-                return $"Type: {type?.Name ?? "Unknown"}";
-            }
-        }
-
-        private void OpenProjectFolder()
+        private void SelectFolder()
         {
             string path = EditorUtility.OpenFolderPanel("Select Folder to Analyze", selectedFolder, "");
             if (!string.IsNullOrEmpty(path))
@@ -1325,75 +193,509 @@ namespace ArchitectureVisualizer
                 pathLabel.text = $"Current path: {selectedFolder}";
             }
         }
+
+        private void UpdateTables()
+        {
+            tablesContainer.Clear();
+            TableBuilders.CreateEventsTable(tablesContainer, dependencyData);
+            TableBuilders.CreateHardDependenciesTable(tablesContainer, dependencyData);
+            TableBuilders.CreateDITable(tablesContainer, dependencyData);
+            TableBuilders.CreateScriptableObjectTable(tablesContainer, dependencyData);
+            TableBuilders.CreateSingletonTable(tablesContainer, dependencyData);
+            TableBuilders.CreateMessageBusTable(tablesContainer, dependencyData);
+        }
+
+        private void UpdateStructure()
+        {
+            StructureViewBuilder.UpdateStructure((ScrollView)structureContainer, selectedFolder);
+        }
+
+        private void UpdateScriptDetails()
+        {
+            ScriptDetailsViewBuilder.UpdateScriptDetails(scriptDetailsContainer, selectedFolder);
+        }
+
+        private void UpdateEventTracking()
+        {
+            eventTrackingContainer.Clear();
+            var paths = EventTrackingManager.TrackingPaths;
+            var addPathButton = new Button(() => ShowAddPathDialog()) { text = "Add Path" };
+            addPathButton.style.marginBottom = 8;
+            eventTrackingContainer.Add(addPathButton);
+            if (paths == null || paths.Count == 0)
+            {
+                var label = new Label("No tracking paths. Add a path to track variables.");
+                label.style.unityFontStyleAndWeight = FontStyle.Italic;
+                eventTrackingContainer.Add(label);
+                return;
+            }
+            foreach (var path in paths)
+            {
+                var pathBox = new VisualElement();
+                pathBox.style.marginBottom = 10;
+                pathBox.style.paddingTop = 5;
+                pathBox.style.paddingBottom = 5;
+                pathBox.style.paddingLeft = 10;
+                pathBox.style.paddingRight = 10;
+                pathBox.style.backgroundColor = new Color(0.18f, 0.18f, 0.18f);
+                pathBox.style.borderLeftWidth = 3;
+                pathBox.style.borderLeftColor = path.isTracking ? new Color(0.2f, 0.7f, 0.2f) : new Color(0.5f, 0.5f, 0.5f);
+
+                var headerRow = new VisualElement { style = { flexDirection = FlexDirection.Row } };
+                var title = new Label($"Path: {path.pathName} ({(path.isTracking ? "Active" : "Inactive")})");
+                title.style.unityFontStyleAndWeight = FontStyle.Bold;
+                title.style.fontSize = 14;
+                headerRow.Add(title);
+                var startStopBtn = new Button(() => ToggleTracking(path)) { text = path.isTracking ? "Stop" : "Start" };
+                startStopBtn.style.marginLeft = 10;
+                headerRow.Add(startStopBtn);
+                var editBtn = new Button(() => ShowEditPathDialog(path)) { text = "Edit" };
+                editBtn.style.marginLeft = 10;
+                headerRow.Add(editBtn);
+                var delBtn = new Button(() => DeletePath(path)) { text = "Delete" };
+                delBtn.style.marginLeft = 10;
+                headerRow.Add(delBtn);
+                pathBox.Add(headerRow);
+                if (!string.IsNullOrEmpty(path.description))
+                {
+                    var desc = new Label($"Description: {path.description}");
+                    desc.style.fontSize = 12;
+                    desc.style.marginBottom = 4;
+                    pathBox.Add(desc);
+                }
+                var addStepBtn = new Button(() => ShowAddStepDialog(path)) { text = "Add Step" };
+                addStepBtn.style.marginBottom = 4;
+                pathBox.Add(addStepBtn);
+                if (path.steps != null && path.steps.Count > 0)
+                {
+                    foreach (var step in path.steps)
+                    {
+                        var stepBox = new VisualElement();
+                        stepBox.style.marginTop = 4;
+                        stepBox.style.marginBottom = 4;
+                        stepBox.style.paddingLeft = 10;
+                        stepBox.style.backgroundColor = new Color(0.22f, 0.22f, 0.22f);
+                        var stepLabel = new Label($"{step.scriptName}.{step.variableName}  |  Current: {step.currentValue}  |  Previous: {step.previousValue}");
+                        stepLabel.style.fontSize = 12;
+                        stepBox.Add(stepLabel);
+                        if (!string.IsNullOrEmpty(step.comment))
+                        {
+                            var comment = new Label($"Comment: {step.comment}");
+                            comment.style.fontSize = 11;
+                            comment.style.unityFontStyleAndWeight = FontStyle.Italic;
+                            stepBox.Add(comment);
+                        }
+                        var delStepBtn = new Button(() => DeleteStep(path, step)) { text = "Delete Step" };
+                        delStepBtn.style.marginLeft = 10;
+                        stepBox.Add(delStepBtn);
+                        stepBox.style.marginBottom = 2;
+                        pathBox.Add(stepBox);
+                    }
+                }
+                else
+                {
+                    var empty = new Label("No steps in this path.");
+                    empty.style.fontSize = 11;
+                    pathBox.Add(empty);
+                }
+                eventTrackingContainer.Add(pathBox);
+            }
+        }
+
+        private void ToggleTracking(TrackingPath path)
+        {
+            path.isTracking = !path.isTracking;
+            UpdateEventTracking();
+        }
+
+        private void ShowAddPathDialog()
+        {
+            var window = ScriptableObject.CreateInstance<AddPathWindow>();
+            window.titleContent = new GUIContent("Add Path");
+            window.OnPathCreated = (newPath) => {
+                EventTrackingManager.TrackingPaths.Add(newPath);
+                UpdateEventTracking();
+            };
+            window.selectedFolder = selectedFolder;
+            window.ShowUtility();
+        }
+
+        private void ShowEditPathDialog(TrackingPath path)
+        {
+            var window = ScriptableObject.CreateInstance<EditPathWindow>();
+            window.titleContent = new GUIContent("Edit Path");
+            window.PathToEdit = path;
+            window.OnPathEdited = () => {
+                UpdateEventTracking();
+            };
+            window.selectedFolder = selectedFolder;
+            window.ShowUtility();
+        }
+
+        private void ShowAddStepDialog(TrackingPath path)
+        {
+            var window = ScriptableObject.CreateInstance<AddStepWindow>();
+            window.titleContent = new GUIContent("Добавить шаг");
+            window.OnStepCreated = (newStep) => {
+                path.steps.Add(newStep);
+                UpdateEventTracking();
+            };
+            window.selectedFolder = selectedFolder;
+            window.ShowUtility();
+        }
+
+        private void DeletePath(TrackingPath path)
+        {
+            EventTrackingManager.TrackingPaths.Remove(path);
+            UpdateEventTracking();
+        }
+
+        private void DeleteStep(TrackingPath path, TrackingStep step)
+        {
+            path.steps.Remove(step);
+            UpdateEventTracking();
+        }
     }
 
-    public class DependencyData
+    // Вспомогательный класс AddPathWindow
+    public class AddPathWindow : EditorWindow
     {
-        public List<EventData> Events = new List<EventData>();
-        public List<HardDependencyData> HardDependencies = new List<HardDependencyData>();
-        public List<DIData> Dependencies = new List<DIData>();
-        public List<ScriptableObjectData> ScriptableObjects = new List<ScriptableObjectData>();
-        public List<SingletonData> Singletons = new List<SingletonData>();
-        public List<MessageData> Messages = new List<MessageData>();
+        public Action<TrackingPath> OnPathCreated;
+        public string selectedFolder = "Assets";
+        private string pathName = "";
+        private string comment = "";
+        private string selectedScript = "";
+        private string selectedVariable = "";
+        private List<string> availableScripts = new List<string>();
+        private Dictionary<string, List<string>> scriptVariables = new Dictionary<string, List<string>>();
+        private Vector2 scrollPos;
 
-        public class EventData
+        private void OnEnable()
         {
-            public string Generator;
-            public string Subscriber;
-            public string SubscriberMethod;
-            public string Description;
+            LoadAvailableScripts();
         }
 
-        public class HardDependencyData
+        private void LoadAvailableScripts()
         {
-            public string Consumer;
-            public string Dependency;
-            public string AccessMethod;
-            public string Risks;
+            availableScripts.Clear();
+            scriptVariables.Clear();
+            string[] scriptGuids = AssetDatabase.FindAssets("t:Script", new[] { selectedFolder });
+            foreach (var guid in scriptGuids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (path.Contains("Packages/") || path.Contains("Library/")) continue;
+                var script = AssetDatabase.LoadAssetAtPath<MonoScript>(path);
+                if (script == null) continue;
+                var type = script.GetClass();
+                if (type == null) continue;
+                string scriptName = script.name;
+                availableScripts.Add(scriptName);
+                var variables = new List<string>();
+                var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+                foreach (var field in fields)
+                {
+                    variables.Add(field.Name);
+                }
+                var properties = type.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+                foreach (var property in properties)
+                {
+                    if (property.CanRead)
+                    {
+                        variables.Add(property.Name + " [Property]");
+                    }
+                }
+                scriptVariables[scriptName] = variables;
+            }
+            if (availableScripts.Count > 0)
+            {
+                selectedScript = availableScripts[0];
+                UpdateVariableDropdown();
+            }
         }
 
-        public class DIData
+        private void UpdateVariableDropdown()
         {
-            public string Class;
-            public string Interface;
-            public string InjectionMethod;
-            public string Notes;
+            if (!string.IsNullOrEmpty(selectedScript) && scriptVariables.ContainsKey(selectedScript))
+            {
+                var vars = scriptVariables[selectedScript];
+                if (vars.Count > 0)
+                    selectedVariable = vars[0];
+            }
         }
 
-        public class ScriptableObjectData
+        private void OnGUI()
         {
-            public string SOObject;
-            public string User;
-            public string MethodOrProperty;
-            public string Notes;
-        }
-
-        public class SingletonData
-        {
-            public string SingletonClass;
-            public string User;
-            public string AccessMethod;
-            public string Problems;
-        }
-
-        public class MessageData
-        {
-            public string Sender;
-            public string Receiver;
-            public string MessageType;
-            public string Notes;
+            GUILayout.Label("Add new tracking path", EditorStyles.boldLabel);
+            if (availableScripts.Count == 0)
+            {
+                GUILayout.Label("No scripts found in selected folder.", EditorStyles.wordWrappedLabel);
+                if (GUILayout.Button("Refresh"))
+                {
+                    LoadAvailableScripts();
+                }
+                return;
+            }
+            int scriptIdx = availableScripts.IndexOf(selectedScript);
+            int newScriptIdx = EditorGUILayout.Popup("Script", scriptIdx, availableScripts.ToArray());
+            if (newScriptIdx != scriptIdx)
+            {
+                selectedScript = availableScripts[newScriptIdx];
+                UpdateVariableDropdown();
+            }
+            var vars = scriptVariables.ContainsKey(selectedScript) ? scriptVariables[selectedScript] : new List<string>();
+            int varIdx = vars.IndexOf(selectedVariable);
+            int newVarIdx = EditorGUILayout.Popup("Variable", varIdx >= 0 ? varIdx : 0, vars.ToArray());
+            if (newVarIdx != varIdx && newVarIdx >= 0 && newVarIdx < vars.Count)
+            {
+                selectedVariable = vars[newVarIdx];
+            }
+            pathName = EditorGUILayout.TextField("Path name", pathName);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Comment", GUILayout.Width(70));
+            scrollPos = EditorGUILayout.BeginScrollView(scrollPos, GUILayout.Height(60));
+            comment = EditorGUILayout.TextArea(comment, GUILayout.ExpandHeight(true));
+            EditorGUILayout.EndScrollView();
+            EditorGUILayout.EndHorizontal();
+            GUILayout.Space(10);
+            if (GUILayout.Button("Add"))
+            {
+                if (!string.IsNullOrEmpty(pathName) && !string.IsNullOrEmpty(selectedScript) && !string.IsNullOrEmpty(selectedVariable))
+                {
+                    var newPath = new TrackingPath {
+                        pathName = pathName,
+                        description = "",
+                        steps = new List<TrackingStep> {
+                            new TrackingStep {
+                                scriptName = selectedScript,
+                                variableName = selectedVariable,
+                                comment = comment,
+                                currentValue = "",
+                                previousValue = "",
+                                hasChanged = false
+                            }
+                        },
+                        isTracking = false
+                    };
+                    OnPathCreated?.Invoke(newPath);
+                    Close();
+                }
+                else
+                {
+                    EditorUtility.DisplayDialog("Error", "Path name, script and variable must be selected!", "OK");
+                }
+            }
+            if (GUILayout.Button("Cancel"))
+            {
+                Close();
+            }
         }
     }
-}
 
+    public class AddStepWindow : EditorWindow
+    {
+        public Action<TrackingStep> OnStepCreated;
+        public string selectedFolder = "Assets";
+        private string selectedScript = "";
+        private string selectedVariable = "";
+        private string comment = "";
+        private Vector2 scrollPos;
+        private List<string> availableScripts = new List<string>();
+        private Dictionary<string, List<string>> scriptVariables = new Dictionary<string, List<string>>();
 
+        private void OnEnable()
+        {
+            LoadAvailableScripts();
+        }
 
+        private void LoadAvailableScripts()
+        {
+            availableScripts.Clear();
+            scriptVariables.Clear();
+            string[] scriptGuids = AssetDatabase.FindAssets("t:Script", new[] { selectedFolder });
+            foreach (var guid in scriptGuids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (path.Contains("Packages/") || path.Contains("Library/")) continue;
+                var script = AssetDatabase.LoadAssetAtPath<MonoScript>(path);
+                if (script == null) continue;
+                var type = script.GetClass();
+                if (type == null) continue;
+                string scriptName = script.name;
+                availableScripts.Add(scriptName);
+                var variables = new List<string>();
+                var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+                foreach (var field in fields)
+                {
+                    variables.Add(field.Name);
+                }
+                var properties = type.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
+                foreach (var property in properties)
+                {
+                    if (property.CanRead)
+                    {
+                        variables.Add(property.Name + " [Property]");
+                    }
+                }
+                scriptVariables[scriptName] = variables;
+            }
+            if (availableScripts.Count > 0)
+            {
+                selectedScript = availableScripts[0];
+                UpdateVariableDropdown();
+            }
+        }
 
+        private void UpdateVariableDropdown()
+        {
+            if (!string.IsNullOrEmpty(selectedScript) && scriptVariables.ContainsKey(selectedScript))
+            {
+                var vars = scriptVariables[selectedScript];
+                if (vars.Count > 0)
+                    selectedVariable = vars[0];
+            }
+        }
 
+        private void OnGUI()
+        {
+            GUILayout.Label("Добавление шага", EditorStyles.boldLabel);
+            if (availableScripts.Count == 0)
+            {
+                GUILayout.Label("Нет доступных скриптов в выбранной папке.", EditorStyles.wordWrappedLabel);
+                if (GUILayout.Button("Обновить"))
+                {
+                    LoadAvailableScripts();
+                }
+                return;
+            }
+            int scriptIdx = availableScripts.IndexOf(selectedScript);
+            int newScriptIdx = EditorGUILayout.Popup("Скрипт", scriptIdx, availableScripts.ToArray());
+            if (newScriptIdx != scriptIdx)
+            {
+                selectedScript = availableScripts[newScriptIdx];
+                UpdateVariableDropdown();
+            }
+            var vars = scriptVariables.ContainsKey(selectedScript) ? scriptVariables[selectedScript] : new List<string>();
+            int varIdx = vars.IndexOf(selectedVariable);
+            int newVarIdx = EditorGUILayout.Popup("Переменная", varIdx >= 0 ? varIdx : 0, vars.ToArray());
+            if (newVarIdx != varIdx && newVarIdx >= 0 && newVarIdx < vars.Count)
+            {
+                selectedVariable = vars[newVarIdx];
+            }
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Комментарий", GUILayout.Width(80));
+            scrollPos = EditorGUILayout.BeginScrollView(scrollPos, GUILayout.Height(60));
+            comment = EditorGUILayout.TextArea(comment, GUILayout.ExpandHeight(true));
+            EditorGUILayout.EndScrollView();
+            EditorGUILayout.EndHorizontal();
+            GUILayout.Space(10);
+            if (GUILayout.Button("Добавить"))
+            {
+                if (!string.IsNullOrEmpty(selectedScript) && !string.IsNullOrEmpty(selectedVariable))
+                {
+                    var step = new TrackingStep
+                    {
+                        scriptName = selectedScript,
+                        variableName = selectedVariable,
+                        comment = comment,
+                        currentValue = "",
+                        previousValue = "",
+                        hasChanged = false
+                    };
+                    OnStepCreated?.Invoke(step);
+                    Close();
+                }
+                else
+                {
+                    EditorUtility.DisplayDialog("Ошибка", "Выберите скрипт и переменную!", "OK");
+                }
+            }
+            if (GUILayout.Button("Отмена"))
+            {
+                Close();
+            }
+        }
+    }
 
+    public class EditPathWindow : EditorWindow
+    {
+        public TrackingPath PathToEdit;
+        public Action OnPathEdited;
+        public string selectedFolder = "Assets";
+        private string pathName = "";
+        private string description = "";
+        private Vector2 scrollPos;
 
+        private void OnEnable()
+        {
+            if (PathToEdit != null)
+            {
+                pathName = PathToEdit.pathName;
+                description = PathToEdit.description;
+            }
+        }
 
-
-
-
-
+        private void OnGUI()
+        {
+            if (PathToEdit == null)
+            {
+                GUILayout.Label("No path selected.", EditorStyles.boldLabel);
+                return;
+            }
+            GUILayout.Label("Edit tracking path", EditorStyles.boldLabel);
+            pathName = EditorGUILayout.TextField("Path name", pathName);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Description", GUILayout.Width(80));
+            scrollPos = EditorGUILayout.BeginScrollView(scrollPos, GUILayout.Height(60));
+            description = EditorGUILayout.TextArea(description, GUILayout.ExpandHeight(true));
+            EditorGUILayout.EndScrollView();
+            EditorGUILayout.EndHorizontal();
+            GUILayout.Space(10);
+            GUILayout.Label("Steps:", EditorStyles.boldLabel);
+            if (PathToEdit.steps != null && PathToEdit.steps.Count > 0)
+            {
+                for (int i = 0; i < PathToEdit.steps.Count; i++)
+                {
+                    var step = PathToEdit.steps[i];
+                    EditorGUILayout.BeginVertical("box");
+                    EditorGUILayout.LabelField($"Script: {step.scriptName}");
+                    EditorGUILayout.LabelField($"Variable: {step.variableName}");
+                    EditorGUILayout.LabelField("Comment:");
+                    step.comment = EditorGUILayout.TextArea(step.comment, GUILayout.Height(40));
+                    if (GUILayout.Button("Delete Step"))
+                    {
+                        PathToEdit.steps.RemoveAt(i);
+                        i--;
+                    }
+                    EditorGUILayout.EndVertical();
+                }
+            }
+            else
+            {
+                GUILayout.Label("No steps in this path.");
+            }
+            if (GUILayout.Button("Add Step"))
+            {
+                var addStepWindow = ScriptableObject.CreateInstance<AddStepWindow>();
+                addStepWindow.titleContent = new GUIContent("Add Step");
+                addStepWindow.selectedFolder = selectedFolder;
+                addStepWindow.OnStepCreated = (newStep) => {
+                    PathToEdit.steps.Add(newStep);
+                    Repaint();
+                };
+                addStepWindow.ShowUtility();
+            }
+            GUILayout.Space(10);
+            if (GUILayout.Button("Save"))
+            {
+                PathToEdit.pathName = pathName;
+                PathToEdit.description = description;
+                OnPathEdited?.Invoke();
+                Close();
+            }
+            if (GUILayout.Button("Cancel"))
+            {
+                Close();
+            }
+        }
+    }
+} 
