@@ -10,11 +10,15 @@ namespace ArchitectureVisualizer
     public class TrackedInstance
     {
         public int instanceId;
-        public string instanceName;
-        public string currentValue;
-        public string previousValue;
-        public bool hasChanged;
-        public double lastChangeTime;
+        public string lastValue;
+        public double highlightStartTime;
+        public double lastCheckTime;
+
+        [NonSerialized]
+        public UnityEngine.UIElements.Label valueLabel;
+        
+        [NonSerialized]
+        public Component component;
     }
 
     [Serializable]

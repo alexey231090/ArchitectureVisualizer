@@ -248,79 +248,72 @@ namespace ArchitectureVisualizer
                         var component = obj as Component;
                         if (component == null) continue;
 
-                        int instanceId = component.gameObject.GetInstanceID();
-                        var trackedInstance = step.trackedInstances.FirstOrDefault(i => i.instanceId == instanceId);
-
-                        object value = GetValue(component, step.variableName);
-                        string stringValue = GetValueAsString(value);
+                        int instanceId = obj.GetInstanceID();
+                        var trackedInstance = step.trackedInstances.FirstOrDefault(inst => inst.instanceId == instanceId);
 
                         if (trackedInstance == null)
                         {
                             trackedInstance = new TrackedInstance
                             {
                                 instanceId = instanceId,
-                                instanceName = component.gameObject.name,
-                                currentValue = stringValue,
-                                previousValue = stringValue,
-                                hasChanged = false
+                                component = component,
+                                lastValue = null,
+                                lastCheckTime = EditorApplication.timeSinceStartup,
+                                highlightStartTime = 0
                             };
                             step.trackedInstances.Add(trackedInstance);
                             structureChanged = true;
                         }
                         else
                         {
-                            if (trackedInstance.currentValue != stringValue)
-                            {
-                                trackedInstance.previousValue = trackedInstance.currentValue;
-                                trackedInstance.currentValue = stringValue;
-                                trackedInstance.hasChanged = true;
-                                trackedInstance.lastChangeTime = EditorApplication.timeSinceStartup;
-
-                                if (_instanceLabels.TryGetValue(trackedInstance.instanceId, out var label))
-                                {
-                                    label.text = $"  - {trackedInstance.instanceName}: {trackedInstance.currentValue}";
-                                }
-                            }
+                            // Re-link the live component, as it's NonSerialized
+                            trackedInstance.component = component;
                         }
+
+                        object currentValue = GetValue(component, step.variableName);
+                        string currentValueStr = GetValueAsString(currentValue);
+                        
+                        // Update UI label if it exists
+                        if (trackedInstance.valueLabel != null)
+                        {
+                            trackedInstance.valueLabel.text = $"Value: {currentValueStr}";
+                        }
+
+                        if (trackedInstance.lastValue != null && trackedInstance.lastValue != currentValueStr)
+                        {
+                            trackedInstance.highlightStartTime = EditorApplication.timeSinceStartup;
+                        }
+
+                        trackedInstance.lastValue = currentValueStr;
+                        trackedInstance.lastCheckTime = EditorApplication.timeSinceStartup;
                     }
                 }
-                path.lastUpdateTime = DateTime.Now.ToString("HH:mm:ss");
             }
             return structureChanged;
         }
 
         private void UpdateHighlightColors()
         {
-            if (!_instanceLabels.Any()) return;
-
-            var allInstances = EventTrackingManager.TrackingPaths
-                .Where(p => p.isTracking)
-                .SelectMany(p => p.steps)
-                .SelectMany(s => s.trackedInstances);
-
-            foreach (var instance in allInstances)
+            foreach (var path in EventTrackingManager.TrackingPaths)
             {
-                if (_instanceLabels.TryGetValue(instance.instanceId, out var label))
+                foreach (var step in path.steps)
                 {
-                    Color targetColor = Color.white;
-                    if (instance.hasChanged)
+                    foreach (var instance in step.trackedInstances)
                     {
-                        double timeSinceChange = EditorApplication.timeSinceStartup - instance.lastChangeTime;
-                        
-                        if (timeSinceChange < 1.0)
+                        if (instance.valueLabel != null && instance.highlightStartTime > 0)
                         {
-                            targetColor = Color.yellow;
+                            double timeSinceChange = EditorApplication.timeSinceStartup - instance.highlightStartTime;
+                            if (timeSinceChange < 1.0) // Highlight for 1 second
+                            {
+                                float t = (float)timeSinceChange;
+                                instance.valueLabel.style.color = Color.Lerp(Color.yellow, Color.white, t);
+                            }
+                            else
+                            {
+                                instance.valueLabel.style.color = Color.white;
+                                instance.highlightStartTime = 0; // Reset highlight
+                            }
                         }
-                        else
-                        {
-                            instance.hasChanged = false;
-                        }
-                    }
-                    
-                    if (label.style.color.value != targetColor) 
-                    {
-                        label.style.color = targetColor;
-                        label.MarkDirtyRepaint();
                     }
                 }
             }
@@ -414,105 +407,63 @@ namespace ArchitectureVisualizer
             eventTrackingContainer.Clear();
             _instanceLabels.Clear();
 
-            var paths = EventTrackingManager.TrackingPaths;
-            var addPathButton = new Button(() => ShowAddPathDialog()) { text = "Add Path" };
-            addPathButton.style.marginBottom = 8;
-            eventTrackingContainer.Add(addPathButton);
-            if (paths == null || paths.Count == 0)
+            // Заголовок
+            var headerContainer = new VisualElement { style = { flexDirection = FlexDirection.Row, alignItems = Align.Center, marginBottom = 10 } };
+            var titleLabel = new Label("Event Tracking") { style = { fontSize = 16, unityFontStyleAndWeight = FontStyle.Bold, marginRight = 20 } };
+            var addButton = new Button(() => ShowAddPathDialog()) { text = "Add Path" };
+            headerContainer.Add(titleLabel);
+            headerContainer.Add(addButton);
+            eventTrackingContainer.Add(headerContainer);
+
+            // Список путей
+            foreach (var path in EventTrackingManager.TrackingPaths)
             {
-                var label = new Label("No tracking paths. Add a path to track variables.");
-                label.style.unityFontStyleAndWeight = FontStyle.Italic;
-                eventTrackingContainer.Add(label);
-                return;
-            }
-            foreach (var path in paths)
-            {
-                var pathBox = new VisualElement();
-                pathBox.style.marginBottom = 10;
-                pathBox.style.paddingTop = 5;
-                pathBox.style.paddingBottom = 5;
-                pathBox.style.paddingLeft = 10;
-                pathBox.style.paddingRight = 10;
-                pathBox.style.backgroundColor = new Color(0.18f, 0.18f, 0.18f);
-                pathBox.style.borderLeftWidth = 3;
-                pathBox.style.borderLeftColor = path.isTracking ? new Color(0.2f, 0.7f, 0.2f) : new Color(0.5f, 0.5f, 0.5f);
+                var pathContainer = new Foldout { text = $"{path.pathName} ({(path.isTracking ? "Tracking" : "Stopped")})", value = true };
+                pathContainer.style.marginTop = 5;
+                eventTrackingContainer.Add(pathContainer);
 
-                var headerRow = new VisualElement { style = { flexDirection = FlexDirection.Row, justifyContent = Justify.SpaceBetween, alignItems = Align.Center } };
-                var title = new Label($"Path: {path.pathName} ({(path.isTracking ? "Active" : "Inactive")})");
-                title.style.unityFontStyleAndWeight = FontStyle.Bold;
-                title.style.fontSize = 14;
-                headerRow.Add(title);
-                
-                var buttonsRow = new VisualElement { style = { flexDirection = FlexDirection.Row } };
+                var pathControls = new VisualElement { style = { flexDirection = FlexDirection.Row, marginTop = 5 } };
+                var toggleButton = new Button(() => ToggleTracking(path)) { text = path.isTracking ? "Stop" : "Start" };
+                var editButton = new Button(() => ShowEditPathDialog(path)) { text = "Edit" };
+                var deleteButton = new Button(() => DeletePath(path)) { text = "Delete" };
+                var addStepButton = new Button(() => ShowAddStepDialog(path)) { text = "Add Step" };
 
-                var startStopBtn = new Button(() => ToggleTracking(path)) { text = path.isTracking ? "Stop" : "Start" };
-                startStopBtn.style.marginLeft = 10;
-                buttonsRow.Add(startStopBtn);
-                
-                var editBtn = new Button(() => ShowEditPathDialog(path)) { text = "Edit" };
-                editBtn.style.marginLeft = 5;
-                buttonsRow.Add(editBtn);
+                pathControls.Add(toggleButton);
+                pathControls.Add(editButton);
+                pathControls.Add(deleteButton);
+                pathControls.Add(addStepButton);
+                pathContainer.Add(pathControls);
 
-                var deleteBtn = new Button(() => DeletePath(path)) { text = "Delete" };
-                deleteBtn.style.marginLeft = 5;
-                buttonsRow.Add(deleteBtn);
-
-                headerRow.Add(buttonsRow);
-                pathBox.Add(headerRow);
-                
-                var descriptionLabel = new Label(path.description);
-                descriptionLabel.style.marginTop = 5;
-                descriptionLabel.style.unityFontStyleAndWeight = FontStyle.Italic;
-                pathBox.Add(descriptionLabel);
-
-                if (path.steps != null && path.steps.Count > 0)
+                foreach (var step in path.steps)
                 {
-                    var stepsContainer = new VisualElement();
-                    stepsContainer.style.marginTop = 10;
-                    stepsContainer.style.marginLeft = 15;
-                    
-                    foreach (var step in path.steps)
-                    {
-                        var stepBox = new VisualElement();
-                        var stepLabel = new Label($"Step: {step.scriptName} -> {step.variableName}");
-                        stepLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-                        stepLabel.style.fontSize = 14;
-                        stepBox.Add(stepLabel);
+                    var stepContainer = new Foldout { text = $"Step: {step.scriptName} -> {step.variableName}", value = true };
+                    stepContainer.style.marginLeft = 20;
+                    pathContainer.Add(stepContainer);
 
-                        if (step.trackedInstances != null)
+                    var stepControls = new VisualElement { style = { flexDirection = FlexDirection.Row, marginTop = 5 } };
+                    var deleteStepButton = new Button(() => DeleteStep(path, step)) { text = "Delete Step" };
+                    stepControls.Add(deleteStepButton);
+                    stepContainer.Add(stepControls);
+                    
+                    if (step.comment != null && step.comment != "")
+                    {
+                        stepContainer.Add(new Label($"Comment: {step.comment}"));
+                    }
+
+                    if (path.isTracking)
+                    {
+                        foreach (var instance in step.trackedInstances)
                         {
-                            foreach (var instance in step.trackedInstances)
+                            if (instance.component != null)
                             {
-                                var instanceLabel = new Label($"  - {instance.instanceName}: {instance.currentValue}");
+                                var instanceLabel = new Label($"  - {instance.component.gameObject.name}: {instance.lastValue}");
+                                instance.valueLabel = instanceLabel; // Link label to instance
                                 _instanceLabels[instance.instanceId] = instanceLabel;
-                                
-                                instanceLabel.style.color = Color.white;
-                                stepBox.Add(instanceLabel);
+                                stepContainer.Add(instanceLabel);
                             }
                         }
-                        
-                        var deleteStepBtn = new Button(() => DeleteStep(path, step)) { text = "Remove Step" };
-                        deleteStepBtn.style.alignSelf = Align.FlexStart;
-                        deleteStepBtn.style.height = 20;
-                        deleteStepBtn.style.marginTop = 5;
-                        stepBox.Add(deleteStepBtn);
-                        
-                        stepsContainer.Add(stepBox);
                     }
-                    pathBox.Add(stepsContainer);
                 }
-
-                var addStepBtn = new Button(() => ShowAddStepDialog(path)) { text = "Add Step" };
-                addStepBtn.style.marginTop = 10;
-                pathBox.Add(addStepBtn);
-
-                var timeLabel = new Label($"Last update: {path.lastUpdateTime}");
-                timeLabel.style.fontSize = 9;
-                timeLabel.style.color = Color.gray;
-                timeLabel.style.marginTop = 5;
-                pathBox.Add(timeLabel);
-
-                eventTrackingContainer.Add(pathBox);
             }
         }
 
