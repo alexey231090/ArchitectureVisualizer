@@ -38,18 +38,19 @@ namespace ArchitectureVisualizer
         private double lastUpdateTime = 0;
         private const double updateInterval = 0.5; // Обновлять значения раз в 0.5 сек
 
+        private Dictionary<int, Label> _instanceLabels = new Dictionary<int, Label>();
         private string selectedScriptName;
 
         private void OnEnable()
         {
             Debug.Log("ArchitectureVisualizerWindow: OnEnable");
             CreateGUI();
-            EditorApplication.update += UpdateTrackedValues;
+            EditorApplication.update += UpdateTrackedValuesAndColors;
         }
 
         private void OnDisable()
         {
-            EditorApplication.update -= UpdateTrackedValues;
+            EditorApplication.update -= UpdateTrackedValuesAndColors;
         }
 
         [MenuItem("Tools/Architecture Visualizer")]
@@ -200,21 +201,31 @@ namespace ArchitectureVisualizer
             }
         }
 
-        private void UpdateTrackedValues()
+        private void UpdateTrackedValuesAndColors()
         {
-            bool anyPathIsTracking = EventTrackingManager.TrackingPaths.Any(p => p.isTracking);
-            if (!anyPathIsTracking)
-            {
-                return;
-            }
-
+            UpdateHighlightColors();
+            
             if (EditorApplication.timeSinceStartup - lastUpdateTime < updateInterval)
             {
-                // Больше не перерисовываем на каждом кадре для плавности, чтобы избежать зависаний.
-                // UI будет обновляться только по основному таймеру.
                 return;
             }
             lastUpdateTime = EditorApplication.timeSinceStartup;
+
+            bool structureChanged = UpdateTrackedValuesData();
+            if (structureChanged)
+            {
+                UpdateEventTracking();
+            }
+        }
+
+        private bool UpdateTrackedValuesData()
+        {
+            bool structureChanged = false;
+            bool anyPathIsTracking = EventTrackingManager.TrackingPaths.Any(p => p.isTracking);
+            if (!anyPathIsTracking)
+            {
+                return false;
+            }
 
             foreach (var path in EventTrackingManager.TrackingPaths.Where(p => p.isTracking))
             {
@@ -224,9 +235,14 @@ namespace ArchitectureVisualizer
                     if (scriptType == null) continue;
 
                     var activeObjects = FindObjectsOfType(scriptType);
+                    var activeInstanceIds = activeObjects.Select(o => o.GetInstanceID()).ToList();
 
-                    step.trackedInstances.RemoveAll(inst => !activeObjects.Any(obj => obj.GetInstanceID() == inst.instanceId));
-
+                    int removedCount = step.trackedInstances.RemoveAll(inst => !activeInstanceIds.Contains(inst.instanceId));
+                    if (removedCount > 0)
+                    {
+                        structureChanged = true;
+                    }
+                    
                     foreach (var obj in activeObjects)
                     {
                         var component = obj as Component;
@@ -235,28 +251,79 @@ namespace ArchitectureVisualizer
                         int instanceId = component.gameObject.GetInstanceID();
                         var trackedInstance = step.trackedInstances.FirstOrDefault(i => i.instanceId == instanceId);
 
-                        if (trackedInstance == null)
-                        {
-                            trackedInstance = new TrackedInstance { instanceId = instanceId, instanceName = component.gameObject.name };
-                            step.trackedInstances.Add(trackedInstance);
-                        }
-                        
                         object value = GetValue(component, step.variableName);
                         string stringValue = GetValueAsString(value);
 
-                        if (trackedInstance.currentValue != stringValue)
+                        if (trackedInstance == null)
                         {
-                            trackedInstance.previousValue = trackedInstance.currentValue;
-                            trackedInstance.currentValue = stringValue;
-                            trackedInstance.hasChanged = true;
-                            trackedInstance.lastChangeTime = EditorApplication.timeSinceStartup;
+                            trackedInstance = new TrackedInstance
+                            {
+                                instanceId = instanceId,
+                                instanceName = component.gameObject.name,
+                                currentValue = stringValue,
+                                previousValue = stringValue,
+                                hasChanged = false
+                            };
+                            step.trackedInstances.Add(trackedInstance);
+                            structureChanged = true;
+                        }
+                        else
+                        {
+                            if (trackedInstance.currentValue != stringValue)
+                            {
+                                trackedInstance.previousValue = trackedInstance.currentValue;
+                                trackedInstance.currentValue = stringValue;
+                                trackedInstance.hasChanged = true;
+                                trackedInstance.lastChangeTime = EditorApplication.timeSinceStartup;
+
+                                if (_instanceLabels.TryGetValue(trackedInstance.instanceId, out var label))
+                                {
+                                    label.text = $"  - {trackedInstance.instanceName}: {trackedInstance.currentValue}";
+                                }
+                            }
                         }
                     }
                 }
                 path.lastUpdateTime = DateTime.Now.ToString("HH:mm:ss");
             }
+            return structureChanged;
+        }
 
-            UpdateEventTracking();
+        private void UpdateHighlightColors()
+        {
+            if (!_instanceLabels.Any()) return;
+
+            var allInstances = EventTrackingManager.TrackingPaths
+                .Where(p => p.isTracking)
+                .SelectMany(p => p.steps)
+                .SelectMany(s => s.trackedInstances);
+
+            foreach (var instance in allInstances)
+            {
+                if (_instanceLabels.TryGetValue(instance.instanceId, out var label))
+                {
+                    Color targetColor = Color.white;
+                    if (instance.hasChanged)
+                    {
+                        double timeSinceChange = EditorApplication.timeSinceStartup - instance.lastChangeTime;
+                        
+                        if (timeSinceChange < 1.0)
+                        {
+                            targetColor = Color.yellow;
+                        }
+                        else
+                        {
+                            instance.hasChanged = false;
+                        }
+                    }
+                    
+                    if (label.style.color.value != targetColor) 
+                    {
+                        label.style.color = targetColor;
+                        label.MarkDirtyRepaint();
+                    }
+                }
+            }
         }
         
         private object GetValue(object source, string name)
@@ -345,6 +412,8 @@ namespace ArchitectureVisualizer
         private void UpdateEventTracking()
         {
             eventTrackingContainer.Clear();
+            _instanceLabels.Clear();
+
             var paths = EventTrackingManager.TrackingPaths;
             var addPathButton = new Button(() => ShowAddPathDialog()) { text = "Add Path" };
             addPathButton.style.marginBottom = 8;
@@ -407,26 +476,17 @@ namespace ArchitectureVisualizer
                         var stepBox = new VisualElement();
                         var stepLabel = new Label($"Step: {step.scriptName} -> {step.variableName}");
                         stepLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+                        stepLabel.style.fontSize = 14;
                         stepBox.Add(stepLabel);
 
                         if (step.trackedInstances != null)
                         {
                             foreach (var instance in step.trackedInstances)
                             {
-                                var instanceLabel = new Label($"  - {instance.instanceName} (ID:{instance.instanceId}): {instance.currentValue}");
-                                if (instance.hasChanged)
-                                {
-                                    double timeSinceChange = EditorApplication.timeSinceStartup - instance.lastChangeTime;
-                                    float fade = Mathf.Clamp01(1.0f - ((float)timeSinceChange / 2.0f)); // Затухание в течение 2 секунд
-                                    if (fade > 0)
-                                    {
-                                        instanceLabel.style.color = Color.Lerp(Color.white, new Color(0.5f, 1f, 0.5f), fade);
-                                    }
-                                    else
-                                    {
-                                        instance.hasChanged = false; // Сбрасываем флаг после затухания
-                                    }
-                                }
+                                var instanceLabel = new Label($"  - {instance.instanceName}: {instance.currentValue}");
+                                _instanceLabels[instance.instanceId] = instanceLabel;
+                                
+                                instanceLabel.style.color = Color.white;
                                 stepBox.Add(instanceLabel);
                             }
                         }
@@ -459,17 +519,15 @@ namespace ArchitectureVisualizer
         private void ToggleTracking(TrackingPath path)
         {
             path.isTracking = !path.isTracking;
-            EventTrackingManager.UpdatePath(); // Сохраняем новое состояние
+            EventTrackingManager.UpdatePath();
 
             if (path.isTracking)
             {
-                // Принудительно запускаем немедленное обновление для заполнения данных
-                lastUpdateTime = 0;
-                UpdateTrackedValues();
+                UpdateTrackedValuesData();
+                UpdateEventTracking();
             }
             else
             {
-                // При остановке очищаем инстансы и перерисовываем UI
                 foreach (var step in path.steps)
                 {
                     step.trackedInstances.Clear();
