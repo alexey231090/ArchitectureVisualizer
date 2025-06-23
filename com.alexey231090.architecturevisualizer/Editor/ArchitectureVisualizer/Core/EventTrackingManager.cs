@@ -29,6 +29,10 @@ namespace ArchitectureVisualizer
         public List<string> variableNames = new List<string>();
         public string comment;
         public List<TrackedInstance> trackedInstances = new List<TrackedInstance>();
+
+        public bool isMonoBehaviourTracked = true;
+        public string hostScriptName;
+        public string instanceFieldName;
     }
 
     [Serializable]

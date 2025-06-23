@@ -232,11 +232,37 @@ namespace ArchitectureVisualizer
                 foreach (var step in path.steps)
                 {
                     var variables = (step.variableNames != null && step.variableNames.Count > 0) ? step.variableNames : new List<string> { step.variableName };
-                    Type scriptType = FindType(step.scriptName);
-                    if (scriptType == null) continue;
+                    
+                    List<object> targetObjects = new List<object>();
 
-                    var activeObjects = FindObjectsOfType(scriptType);
-                    var activeInstanceIds = activeObjects.Select(o => o.GetInstanceID()).ToList();
+                    if (step.isMonoBehaviourTracked)
+                    {
+                        Type scriptType = FindType(step.scriptName);
+                        if (scriptType != null)
+                        {
+                            targetObjects.AddRange(FindObjectsOfType(scriptType));
+                        }
+                    }
+                    else
+                    {
+                        Type hostType = FindType(step.hostScriptName);
+                        if (hostType != null && !string.IsNullOrEmpty(step.instanceFieldName))
+                        {
+                            var hostObjects = FindObjectsOfType(hostType);
+                            foreach (var hostObj in hostObjects)
+                            {
+                                var instance = GetValue(hostObj, step.instanceFieldName);
+                                if (instance != null)
+                                {
+                                    targetObjects.Add(instance);
+                                }
+                            }
+                        }
+                    }
+
+                    if (targetObjects.Count == 0) continue;
+
+                    var activeInstanceIds = targetObjects.Select(o => o.GetHashCode()).ToList();
 
                     int removedCount = step.trackedInstances.RemoveAll(inst => !activeInstanceIds.Contains(inst.instanceId));
                     if (removedCount > 0)
@@ -244,12 +270,11 @@ namespace ArchitectureVisualizer
                         structureChanged = true;
                     }
 
-                    foreach (var obj in activeObjects)
+                    foreach (var obj in targetObjects)
                     {
-                        var component = obj as Component;
-                        if (component == null) continue;
+                        var component = (obj is Component c) ? c : null;
+                        int instanceId = obj.GetHashCode();
 
-                        int instanceId = obj.GetInstanceID();
                         var trackedInstance = step.trackedInstances.FirstOrDefault(inst => inst.instanceId == instanceId);
                         MultiVarTrackedInstance multiInst;
                         if (trackedInstance == null || !(trackedInstance is MultiVarTrackedInstance))
@@ -276,12 +301,13 @@ namespace ArchitectureVisualizer
 
                         foreach (var varName in variables)
                         {
-                            object currentValue = GetValue(component, varName);
+                            object currentValue = GetValue(obj, varName);
                             string currentValueStr = GetValueAsString(currentValue);
+                            string gameObjectName = component != null ? component.gameObject.name : obj.GetType().Name;
 
                             if (multiInst.valueLabels.ContainsKey(varName))
                             {
-                                multiInst.valueLabels[varName].text = $"  - {multiInst.component.gameObject.name} [{varName}]: {currentValueStr}";
+                                multiInst.valueLabels[varName].text = $"  - {gameObjectName} [{varName}]: {currentValueStr}";
                             }
 
                             if (multiInst.lastValues.ContainsKey(varName) && multiInst.lastValues[varName] != currentValueStr)
@@ -527,12 +553,13 @@ namespace ArchitectureVisualizer
                     {
                         foreach (var instance in step.trackedInstances)
                         {
-                            if (instance.component != null && instance is MultiVarTrackedInstance multiInst)
+                            if (instance is MultiVarTrackedInstance multiInst)
                             {
+                                string gameObjectName = multiInst.component != null ? multiInst.component.gameObject.name : multiInst.GetType().Name;
                                 foreach (var varName in variables)
                                 {
                                     string val = multiInst.lastValues.ContainsKey(varName) ? multiInst.lastValues[varName] : "null";
-                                    var instanceLabel = new Label($"  - {multiInst.component.gameObject.name} [{varName}]: {val}");
+                                    var instanceLabel = new Label($"  - {gameObjectName} [{varName}]: {val}");
                                     multiInst.valueLabels[varName] = instanceLabel;
                                     _instanceLabels[multiInst.instanceId] = instanceLabel;
                                     stepContainer.Add(instanceLabel);
@@ -642,6 +669,11 @@ namespace ArchitectureVisualizer
         private List<string> availableScripts = new List<string>();
         private Dictionary<string, List<string>> scriptVariables = new Dictionary<string, List<string>>();
         private Vector2 scrollPos;
+        private bool isCurrentScriptMono = true;
+        private string selectedHostScript = "";
+        private string selectedInstanceField = "";
+        private List<string> availableMonoScripts = new List<string>();
+        private Dictionary<string, List<string>> monoScriptFields = new Dictionary<string, List<string>>();
 
         private void OnEnable()
         {
@@ -653,6 +685,8 @@ namespace ArchitectureVisualizer
         {
             availableScripts.Clear();
             scriptVariables.Clear();
+            availableMonoScripts.Clear();
+            monoScriptFields.Clear();
 
             var scriptGuids = AssetDatabase.FindAssets("t:script", new[] { selectedFolder });
             foreach (var guid in scriptGuids)
@@ -662,15 +696,22 @@ namespace ArchitectureVisualizer
                 if (script != null)
                 {
                     var type = script.GetClass();
-                    if (type != null && typeof(MonoBehaviour).IsAssignableFrom(type))
+                    if (type != null)
                     {
                         string typeName = type.FullName;
                         availableScripts.Add(typeName);
                         scriptVariables[typeName] = ArchitectureVisualizerWindow.GetFieldAndPropertyNames(type);
+
+                        if (typeof(MonoBehaviour).IsAssignableFrom(type))
+                        {
+                            availableMonoScripts.Add(typeName);
+                            monoScriptFields[typeName] = ArchitectureVisualizerWindow.GetFieldAndPropertyNames(type);
+                        }
                     }
                 }
             }
             availableScripts = availableScripts.OrderBy(s => s).ToList();
+            availableMonoScripts = availableMonoScripts.OrderBy(s => s).ToList();
         }
 
         private void UpdateVariableDropdown(int index)
@@ -702,7 +743,33 @@ namespace ArchitectureVisualizer
                 selectedScript = availableScripts[newScriptIdx];
                 selectedVariables = new List<string> { "" };
                 UpdateVariableDropdown(0);
+
+                var scriptType = Type.GetType(selectedScript);
+                isCurrentScriptMono = scriptType != null && typeof(MonoBehaviour).IsAssignableFrom(scriptType);
             }
+
+            if (!isCurrentScriptMono && !string.IsNullOrEmpty(selectedScript))
+            {
+                GUILayout.Label("Find instance via Component:", EditorStyles.boldLabel);
+                int hostIndex = availableMonoScripts.IndexOf(selectedHostScript);
+                int newHostIndex = EditorGUILayout.Popup("Host Component", hostIndex, availableMonoScripts.ToArray());
+                if (newHostIndex != hostIndex)
+                {
+                    selectedHostScript = availableMonoScripts[newHostIndex];
+                }
+
+                if (!string.IsNullOrEmpty(selectedHostScript))
+                {
+                    var fields = monoScriptFields.ContainsKey(selectedHostScript) ? monoScriptFields[selectedHostScript] : new List<string>();
+                    int fieldIndex = fields.IndexOf(selectedInstanceField);
+                    int newFieldIndex = EditorGUILayout.Popup("Instance Field", fieldIndex, fields.ToArray());
+                    if (newFieldIndex != fieldIndex)
+                    {
+                        selectedInstanceField = fields[newFieldIndex];
+                    }
+                }
+            }
+
             var vars = scriptVariables.ContainsKey(selectedScript) ? scriptVariables[selectedScript] : new List<string>();
             if (!string.IsNullOrEmpty(selectedScript) && vars.Count > 0)
             {
@@ -761,8 +828,11 @@ namespace ArchitectureVisualizer
                     {
                         scriptName = selectedScript,
                         variableNames = selectedVariables.Where(v => !string.IsNullOrEmpty(v)).ToList(),
-                        variableName = selectedVariables.FirstOrDefault(v => !string.IsNullOrEmpty(v)), // для совместимости
-                        comment = "Initial step"
+                        variableName = selectedVariables.FirstOrDefault(v => !string.IsNullOrEmpty(v)),
+                        comment = "Initial step",
+                        isMonoBehaviourTracked = isCurrentScriptMono,
+                        hostScriptName = isCurrentScriptMono ? null : selectedHostScript,
+                        instanceFieldName = isCurrentScriptMono ? null : selectedInstanceField
                     };
                     newPath.steps.Add(firstStep);
                 }
@@ -786,6 +856,11 @@ namespace ArchitectureVisualizer
         private Vector2 scrollPos;
         private List<string> availableScripts = new List<string>();
         private Dictionary<string, List<string>> scriptVariables = new Dictionary<string, List<string>>();
+        private bool isCurrentScriptMono = true;
+        private string selectedHostScript = "";
+        private string selectedInstanceField = "";
+        private List<string> availableMonoScripts = new List<string>();
+        private Dictionary<string, List<string>> monoScriptFields = new Dictionary<string, List<string>>();
 
         private void OnEnable()
         {
@@ -797,6 +872,8 @@ namespace ArchitectureVisualizer
         {
             availableScripts.Clear();
             scriptVariables.Clear();
+            availableMonoScripts.Clear();
+            monoScriptFields.Clear();
 
             var scriptGuids = AssetDatabase.FindAssets("t:script", new[] { selectedFolder });
             foreach (var guid in scriptGuids)
@@ -806,15 +883,22 @@ namespace ArchitectureVisualizer
                 if (script != null)
                 {
                     var type = script.GetClass();
-                    if (type != null && typeof(MonoBehaviour).IsAssignableFrom(type))
+                    if (type != null)
                     {
                         string typeName = type.FullName;
                         availableScripts.Add(typeName);
                         scriptVariables[typeName] = ArchitectureVisualizerWindow.GetFieldAndPropertyNames(type);
+
+                        if (typeof(MonoBehaviour).IsAssignableFrom(type))
+                        {
+                            availableMonoScripts.Add(typeName);
+                            monoScriptFields[typeName] = ArchitectureVisualizerWindow.GetFieldAndPropertyNames(type);
+                        }
                     }
                 }
             }
             availableScripts = availableScripts.OrderBy(s => s).ToList();
+            availableMonoScripts = availableMonoScripts.OrderBy(s => s).ToList();
         }
 
         private void UpdateVariableDropdown(int index)
@@ -840,6 +924,31 @@ namespace ArchitectureVisualizer
                 selectedScript = availableScripts[newSelectedScriptIndex];
                 selectedVariables = new List<string> { "" };
                 UpdateVariableDropdown(0);
+
+                var scriptType = Type.GetType(selectedScript);
+                isCurrentScriptMono = scriptType != null && typeof(MonoBehaviour).IsAssignableFrom(scriptType);
+            }
+
+            if (!isCurrentScriptMono && !string.IsNullOrEmpty(selectedScript))
+            {
+                GUILayout.Label("Find instance via Component:", EditorStyles.boldLabel);
+                int hostIndex = availableMonoScripts.IndexOf(selectedHostScript);
+                int newHostIndex = EditorGUILayout.Popup("Host Component", hostIndex, availableMonoScripts.ToArray());
+                if (newHostIndex != hostIndex)
+                {
+                    selectedHostScript = availableMonoScripts[newHostIndex];
+                }
+
+                if (!string.IsNullOrEmpty(selectedHostScript))
+                {
+                    var fields = monoScriptFields.ContainsKey(selectedHostScript) ? monoScriptFields[selectedHostScript] : new List<string>();
+                    int fieldIndex = fields.IndexOf(selectedInstanceField);
+                    int newFieldIndex = EditorGUILayout.Popup("Instance Field", fieldIndex, fields.ToArray());
+                    if (newFieldIndex != fieldIndex)
+                    {
+                        selectedInstanceField = fields[newFieldIndex];
+                    }
+                }
             }
 
             if (!string.IsNullOrEmpty(selectedScript) && scriptVariables.ContainsKey(selectedScript))
@@ -892,8 +1001,11 @@ namespace ArchitectureVisualizer
                     {
                         scriptName = selectedScript,
                         variableNames = selectedVariables.Where(v => !string.IsNullOrEmpty(v)).ToList(),
-                        variableName = selectedVariables.FirstOrDefault(v => !string.IsNullOrEmpty(v)), // для совместимости
-                        comment = comment
+                        variableName = selectedVariables.FirstOrDefault(v => !string.IsNullOrEmpty(v)),
+                        comment = comment,
+                        isMonoBehaviourTracked = isCurrentScriptMono,
+                        hostScriptName = isCurrentScriptMono ? null : selectedHostScript,
+                        instanceFieldName = isCurrentScriptMono ? null : selectedInstanceField
                     };
                     OnStepCreated?.Invoke(newStep);
                     Close();
