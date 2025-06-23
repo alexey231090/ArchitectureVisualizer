@@ -594,6 +594,7 @@ namespace ArchitectureVisualizer
         private void ShowAddPathDialog()
         {
             var window = GetWindow<AddPathWindow>("Add New Path");
+            window.minSize = new Vector2(500, 750);
             window.OnPathCreated = (newPath) => {
                 EventTrackingManager.AddPath(newPath);
                 UpdateEventTracking();
@@ -613,6 +614,7 @@ namespace ArchitectureVisualizer
         private void ShowAddStepDialog(TrackingPath path)
         {
             var window = GetWindow<AddStepWindow>("Add Step");
+            window.minSize = new Vector2(500, 750);
             window.OnStepCreated = (newStep) => {
                 EventTrackingManager.AddStep(path, newStep);
                 UpdateEventTracking();
@@ -668,7 +670,8 @@ namespace ArchitectureVisualizer
         private List<string> selectedVariables = new List<string>();
         private List<string> availableScripts = new List<string>();
         private Dictionary<string, List<string>> scriptVariables = new Dictionary<string, List<string>>();
-        private Vector2 scrollPos;
+        private Vector2 commentScrollPos;
+        private Dictionary<string, Type> availableScriptTypes = new Dictionary<string, Type>();
         private bool isCurrentScriptMono = true;
         private string selectedHostScript = "";
         private string selectedInstanceField = "";
@@ -687,6 +690,7 @@ namespace ArchitectureVisualizer
             scriptVariables.Clear();
             availableMonoScripts.Clear();
             monoScriptFields.Clear();
+            availableScriptTypes.Clear();
 
             var scriptGuids = AssetDatabase.FindAssets("t:script", new[] { selectedFolder });
             foreach (var guid in scriptGuids)
@@ -701,6 +705,7 @@ namespace ArchitectureVisualizer
                         string typeName = type.FullName;
                         availableScripts.Add(typeName);
                         scriptVariables[typeName] = ArchitectureVisualizerWindow.GetFieldAndPropertyNames(type);
+                        availableScriptTypes[typeName] = type;
 
                         if (typeof(MonoBehaviour).IsAssignableFrom(type))
                         {
@@ -727,6 +732,9 @@ namespace ArchitectureVisualizer
         private void OnGUI()
         {
             GUILayout.Label("Add new tracking path", EditorStyles.boldLabel);
+
+            var leftAlignedButtonStyle = new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft };
+
             if (availableScripts.Count == 0)
             {
                 GUILayout.Label("No scripts found in selected folder.", EditorStyles.wordWrappedLabel);
@@ -736,38 +744,66 @@ namespace ArchitectureVisualizer
                 }
                 return;
             }
-            int scriptIdx = availableScripts.IndexOf(selectedScript);
-            int newScriptIdx = EditorGUILayout.Popup("Script", scriptIdx, availableScripts.ToArray());
-            if (newScriptIdx != scriptIdx)
-            {
-                selectedScript = availableScripts[newScriptIdx];
-                selectedVariables = new List<string> { "" };
-                UpdateVariableDropdown(0);
 
-                var scriptType = Type.GetType(selectedScript);
-                isCurrentScriptMono = scriptType != null && typeof(MonoBehaviour).IsAssignableFrom(scriptType);
+            // Script Selection Button
+            GUILayout.Label("Выберите скрипт:", EditorStyles.wordWrappedLabel);
+            if (GUILayout.Button("Выбрать скрипт"))
+            {
+                var picker = GetWindow<ScriptPickerWindow>("Выберите скрипт");
+                picker.scriptsToShow = availableScripts;
+                picker.onScriptSelected = (pickedScriptName) => {
+                    if (selectedScript != pickedScriptName)
+                    {
+                        selectedScript = pickedScriptName;
+                        selectedVariables = new List<string> { "" };
+                        UpdateVariableDropdown(0);
+                        var scriptType = availableScriptTypes.ContainsKey(selectedScript) ? availableScriptTypes[selectedScript] : null;
+                        isCurrentScriptMono = scriptType != null && typeof(MonoBehaviour).IsAssignableFrom(scriptType);
+                        if (isCurrentScriptMono)
+                        {
+                            selectedHostScript = "";
+                            selectedInstanceField = "";
+                        }
+                    }
+                };
             }
+            if(!string.IsNullOrEmpty(selectedScript)) GUILayout.Label($"Выбрано: {selectedScript}", EditorStyles.boldLabel);
+
 
             if (!isCurrentScriptMono && !string.IsNullOrEmpty(selectedScript))
             {
-                GUILayout.Label("Find instance via Component:", EditorStyles.boldLabel);
-                int hostIndex = availableMonoScripts.IndexOf(selectedHostScript);
-                int newHostIndex = EditorGUILayout.Popup("Host Component", hostIndex, availableMonoScripts.ToArray());
-                if (newHostIndex != hostIndex)
+                GUILayout.Label("Класс не является MonoBehaviour. Укажите, как найти его экземпляр:", EditorStyles.boldLabel);
+                
+                // Host Component Selection Button
+                GUILayout.Label("1. Выберите компонент, в котором хранится экземпляр:", EditorStyles.wordWrappedLabel);
+                if (GUILayout.Button("Выбрать хост-компонент"))
                 {
-                    selectedHostScript = availableMonoScripts[newHostIndex];
+                     var picker = GetWindow<ScriptPickerWindow>("Выберите хост-компонент");
+                     picker.scriptsToShow = availableMonoScripts;
+                     picker.onScriptSelected = (pickedHostName) => {
+                         if (selectedHostScript != pickedHostName)
+                         {
+                             selectedHostScript = pickedHostName;
+                             selectedInstanceField = ""; // Reset field
+                         }
+                     };
                 }
+                 if(!string.IsNullOrEmpty(selectedHostScript)) GUILayout.Label($"Выбрано: {selectedHostScript}", EditorStyles.boldLabel);
+
 
                 if (!string.IsNullOrEmpty(selectedHostScript))
                 {
+                    GUILayout.Label("2. Выберите поле или свойство, содержащее экземпляр:", EditorStyles.wordWrappedLabel);
                     var fields = monoScriptFields.ContainsKey(selectedHostScript) ? monoScriptFields[selectedHostScript] : new List<string>();
                     int fieldIndex = fields.IndexOf(selectedInstanceField);
-                    int newFieldIndex = EditorGUILayout.Popup("Instance Field", fieldIndex, fields.ToArray());
+                    GUILayout.Label("Поле с экземпляром:");
+                    int newFieldIndex = EditorGUILayout.Popup(fieldIndex, fields.ToArray());
                     if (newFieldIndex != fieldIndex)
                     {
                         selectedInstanceField = fields[newFieldIndex];
                     }
                 }
+                GUILayout.Space(10);
             }
 
             var vars = scriptVariables.ContainsKey(selectedScript) ? scriptVariables[selectedScript] : new List<string>();
@@ -809,7 +845,7 @@ namespace ArchitectureVisualizer
             pathName = EditorGUILayout.TextField("Path name", pathName);
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Comment", GUILayout.Width(70));
-            scrollPos = EditorGUILayout.BeginScrollView(scrollPos, GUILayout.Height(60));
+            commentScrollPos = EditorGUILayout.BeginScrollView(commentScrollPos, GUILayout.Height(60));
             comment = EditorGUILayout.TextArea(comment, GUILayout.ExpandHeight(true));
             EditorGUILayout.EndScrollView();
             EditorGUILayout.EndHorizontal();
@@ -856,6 +892,7 @@ namespace ArchitectureVisualizer
         private Vector2 scrollPos;
         private List<string> availableScripts = new List<string>();
         private Dictionary<string, List<string>> scriptVariables = new Dictionary<string, List<string>>();
+        private Dictionary<string, Type> availableScriptTypes = new Dictionary<string, Type>();
         private bool isCurrentScriptMono = true;
         private string selectedHostScript = "";
         private string selectedInstanceField = "";
@@ -874,6 +911,7 @@ namespace ArchitectureVisualizer
             scriptVariables.Clear();
             availableMonoScripts.Clear();
             monoScriptFields.Clear();
+            availableScriptTypes.Clear();
 
             var scriptGuids = AssetDatabase.FindAssets("t:script", new[] { selectedFolder });
             foreach (var guid in scriptGuids)
@@ -888,6 +926,7 @@ namespace ArchitectureVisualizer
                         string typeName = type.FullName;
                         availableScripts.Add(typeName);
                         scriptVariables[typeName] = ArchitectureVisualizerWindow.GetFieldAndPropertyNames(type);
+                        availableScriptTypes[typeName] = type;
 
                         if (typeof(MonoBehaviour).IsAssignableFrom(type))
                         {
@@ -915,40 +954,67 @@ namespace ArchitectureVisualizer
         {
             GUILayout.Label("Add New Step", EditorStyles.boldLabel);
 
-            GUILayout.Label("Select Script:");
-            int selectedScriptIndex = availableScripts.IndexOf(selectedScript);
-            int newSelectedScriptIndex = EditorGUILayout.Popup(selectedScriptIndex, availableScripts.ToArray());
+            var leftAlignedButtonStyle = new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft };
 
-            if (newSelectedScriptIndex != selectedScriptIndex)
+            // Script Selection Button
+            GUILayout.Label("Выберите скрипт:", EditorStyles.wordWrappedLabel);
+             if (GUILayout.Button("Выбрать скрипт"))
             {
-                selectedScript = availableScripts[newSelectedScriptIndex];
-                selectedVariables = new List<string> { "" };
-                UpdateVariableDropdown(0);
-
-                var scriptType = Type.GetType(selectedScript);
-                isCurrentScriptMono = scriptType != null && typeof(MonoBehaviour).IsAssignableFrom(scriptType);
+                var picker = GetWindow<ScriptPickerWindow>("Выберите скрипт");
+                picker.scriptsToShow = availableScripts;
+                picker.onScriptSelected = (pickedScriptName) => {
+                    if (selectedScript != pickedScriptName)
+                    {
+                        selectedScript = pickedScriptName;
+                        selectedVariables = new List<string> { "" };
+                        UpdateVariableDropdown(0);
+                        var scriptType = availableScriptTypes.ContainsKey(selectedScript) ? availableScriptTypes[selectedScript] : null;
+                        isCurrentScriptMono = scriptType != null && typeof(MonoBehaviour).IsAssignableFrom(scriptType);
+                        if (isCurrentScriptMono)
+                        {
+                            selectedHostScript = "";
+                            selectedInstanceField = "";
+                        }
+                    }
+                };
             }
+            if(!string.IsNullOrEmpty(selectedScript)) GUILayout.Label($"Выбрано: {selectedScript}", EditorStyles.boldLabel);
+
 
             if (!isCurrentScriptMono && !string.IsNullOrEmpty(selectedScript))
             {
-                GUILayout.Label("Find instance via Component:", EditorStyles.boldLabel);
-                int hostIndex = availableMonoScripts.IndexOf(selectedHostScript);
-                int newHostIndex = EditorGUILayout.Popup("Host Component", hostIndex, availableMonoScripts.ToArray());
-                if (newHostIndex != hostIndex)
+                GUILayout.Label("Класс не является MonoBehaviour. Укажите, как найти его экземпляр:", EditorStyles.boldLabel);
+
+                // Host Component Selection Button
+                GUILayout.Label("1. Выберите компонент, в котором хранится экземпляр:", EditorStyles.wordWrappedLabel);
+                if (GUILayout.Button("Выбрать хост-компонент"))
                 {
-                    selectedHostScript = availableMonoScripts[newHostIndex];
+                     var picker = GetWindow<ScriptPickerWindow>("Выберите хост-компонент");
+                     picker.scriptsToShow = availableMonoScripts;
+                     picker.onScriptSelected = (pickedHostName) => {
+                         if (selectedHostScript != pickedHostName)
+                         {
+                             selectedHostScript = pickedHostName;
+                             selectedInstanceField = ""; // Reset field
+                         }
+                     };
                 }
+                if(!string.IsNullOrEmpty(selectedHostScript)) GUILayout.Label($"Выбрано: {selectedHostScript}", EditorStyles.boldLabel);
+
 
                 if (!string.IsNullOrEmpty(selectedHostScript))
                 {
+                    GUILayout.Label("2. Выберите поле или свойство, содержащее экземпляр:", EditorStyles.wordWrappedLabel);
                     var fields = monoScriptFields.ContainsKey(selectedHostScript) ? monoScriptFields[selectedHostScript] : new List<string>();
                     int fieldIndex = fields.IndexOf(selectedInstanceField);
-                    int newFieldIndex = EditorGUILayout.Popup("Instance Field", fieldIndex, fields.ToArray());
+                    GUILayout.Label("Поле с экземпляром:");
+                    int newFieldIndex = EditorGUILayout.Popup(fieldIndex, fields.ToArray());
                     if (newFieldIndex != fieldIndex)
                     {
                         selectedInstanceField = fields[newFieldIndex];
                     }
                 }
+                GUILayout.Space(10);
             }
 
             if (!string.IsNullOrEmpty(selectedScript) && scriptVariables.ContainsKey(selectedScript))
@@ -1116,5 +1182,47 @@ namespace ArchitectureVisualizer
         public Dictionary<string, string> lastValues = new Dictionary<string, string>();
         public Dictionary<string, double> highlightStartTimes = new Dictionary<string, double>();
         public Dictionary<string, Label> valueLabels = new Dictionary<string, Label>();
+    }
+
+    public class ScriptPickerWindow : EditorWindow
+    {
+        public List<string> scriptsToShow;
+        public Action<string> onScriptSelected;
+        
+        private string searchQuery = "";
+        private Vector2 scrollPos;
+        private GUIStyle leftAlignedButtonStyle;
+
+        void OnEnable()
+        {
+            minSize = new Vector2(300, 400);
+            leftAlignedButtonStyle = new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft };
+        }
+
+        void OnGUI()
+        {
+            GUILayout.Label("Поиск скрипта:", EditorStyles.boldLabel);
+            searchQuery = EditorGUILayout.TextField(searchQuery);
+            
+            var filteredScripts = string.IsNullOrEmpty(searchQuery)
+                ? scriptsToShow
+                : scriptsToShow.Where(s => s.ToLowerInvariant().Contains(searchQuery.ToLowerInvariant())).ToList();
+
+            scrollPos = EditorGUILayout.BeginScrollView(scrollPos);
+            
+            if(filteredScripts != null)
+            {
+                foreach (var scriptName in filteredScripts)
+                {
+                    if (GUILayout.Button(scriptName, leftAlignedButtonStyle))
+                    {
+                        onScriptSelected?.Invoke(scriptName);
+                        Close();
+                    }
+                }
+            }
+            
+            EditorGUILayout.EndScrollView();
+        }
     }
 } 

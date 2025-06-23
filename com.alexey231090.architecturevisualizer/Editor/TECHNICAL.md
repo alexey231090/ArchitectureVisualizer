@@ -26,6 +26,9 @@
 #### 2. EventTrackingManager
 Компонент для хранения и управления всеми цепочками (paths) и шагами (steps).
 
+#### 3. ScriptPickerWindow (новое)
+Отдельное окно-помощник для выбора скрипта. Содержит поле для поиска и динамически фильтруемый список. Вызывается из окон добавления путей и шагов для улучшения UX.
+
 **Основные функции:**
 - Сериализация и сохранение цепочек и шагов
 - Добавление, удаление, редактирование путей и шагов
@@ -59,9 +62,14 @@ public class TrackingPath
 public class TrackingStep
 {
     public string scriptName;
-    public string variableName;
+    public List<string> variableNames; // Список отслеживаемых переменных
     public string comment;
     public List<TrackedInstance> trackedInstances;
+
+    // Поля для отслеживания не-MonoBehaviour классов
+    public bool isMonoBehaviourTracked; 
+    public string hostScriptName;       // Имя хост-компонента
+    public string instanceFieldName;    // Имя поля/свойства с экземпляром
 }
 ```
 
@@ -69,14 +77,15 @@ public class TrackingStep
 ```csharp
 public class TrackedInstance
 {
-    public int instanceId;
-    public string lastValue;
+    public int instanceId; // Теперь используется HashCode экземпляра
+    public string lastValue; // Используется для обратной совместимости
     public double highlightStartTime;
     public double lastCheckTime;
     public UnityEngine.UIElements.Label valueLabel;
-    public Component component;
+    public Component component; // Может быть null для не-MonoBehaviour
 }
 ```
+Новый класс `MultiVarTrackedInstance` наследуется от `TrackedInstance` и хранит значения для нескольких переменных.
 
 ### Стилизация и производительность
 - Стилизация UI через USS
@@ -91,6 +100,10 @@ public class TrackedInstance
 - Проверка прав доступа
 - Валидация входных данных
 - Логирование и восстановление после сбоев
+
+### Планы на будущее
+- **Улучшение интерфейса Event Tracking:** Дальнейшая работа над UI основной вкладки для более удобного отображения и управления большим количеством путей и шагов.
+- **Отображение типов переменных:** Добавить в UI информацию о типе отслеживаемой переменной (например, `myVariable [int]: 10`), чтобы упростить отладку.
 
 ### Примечание по устаревшим функциям
 - Вкладки Tables и Script Details считаются устаревшими и будут удалены в будущих версиях. Не удалять без отдельной команды!
