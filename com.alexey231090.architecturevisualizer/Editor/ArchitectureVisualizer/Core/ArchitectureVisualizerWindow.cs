@@ -231,6 +231,7 @@ namespace ArchitectureVisualizer
             {
                 foreach (var step in path.steps)
                 {
+                    var variables = (step.variableNames != null && step.variableNames.Count > 0) ? step.variableNames : new List<string> { step.variableName };
                     Type scriptType = FindType(step.scriptName);
                     if (scriptType == null) continue;
 
@@ -242,7 +243,7 @@ namespace ArchitectureVisualizer
                     {
                         structureChanged = true;
                     }
-                    
+
                     foreach (var obj in activeObjects)
                     {
                         var component = obj as Component;
@@ -250,42 +251,47 @@ namespace ArchitectureVisualizer
 
                         int instanceId = obj.GetInstanceID();
                         var trackedInstance = step.trackedInstances.FirstOrDefault(inst => inst.instanceId == instanceId);
-
-                        if (trackedInstance == null)
+                        MultiVarTrackedInstance multiInst;
+                        if (trackedInstance == null || !(trackedInstance is MultiVarTrackedInstance))
                         {
-                            trackedInstance = new TrackedInstance
+                            multiInst = new MultiVarTrackedInstance
                             {
                                 instanceId = instanceId,
                                 component = component,
-                                lastValue = null,
+                                lastValues = new Dictionary<string, string>(),
                                 lastCheckTime = EditorApplication.timeSinceStartup,
-                                highlightStartTime = 0
+                                highlightStartTimes = new Dictionary<string, double>(),
+                                valueLabels = new Dictionary<string, Label>()
                             };
-                            step.trackedInstances.Add(trackedInstance);
+                            if (trackedInstance != null)
+                                step.trackedInstances.Remove(trackedInstance);
+                            step.trackedInstances.Add(multiInst);
                             structureChanged = true;
                         }
                         else
                         {
-                            // Re-link the live component, as it's NonSerialized
-                            trackedInstance.component = component;
+                            multiInst = (MultiVarTrackedInstance)trackedInstance;
+                            multiInst.component = component;
                         }
 
-                        object currentValue = GetValue(component, step.variableName);
-                        string currentValueStr = GetValueAsString(currentValue);
-                        
-                        // Update UI label if it exists
-                        if (trackedInstance.valueLabel != null)
+                        foreach (var varName in variables)
                         {
-                            trackedInstance.valueLabel.text = $"  - {trackedInstance.component.gameObject.name}: {currentValueStr}";
-                        }
+                            object currentValue = GetValue(component, varName);
+                            string currentValueStr = GetValueAsString(currentValue);
 
-                        if (trackedInstance.lastValue != null && trackedInstance.lastValue != currentValueStr)
-                        {
-                            trackedInstance.highlightStartTime = EditorApplication.timeSinceStartup;
-                        }
+                            if (multiInst.valueLabels.ContainsKey(varName))
+                            {
+                                multiInst.valueLabels[varName].text = $"  - {multiInst.component.gameObject.name} [{varName}]: {currentValueStr}";
+                            }
 
-                        trackedInstance.lastValue = currentValueStr;
-                        trackedInstance.lastCheckTime = EditorApplication.timeSinceStartup;
+                            if (multiInst.lastValues.ContainsKey(varName) && multiInst.lastValues[varName] != currentValueStr)
+                            {
+                                multiInst.highlightStartTimes[varName] = EditorApplication.timeSinceStartup;
+                            }
+
+                            multiInst.lastValues[varName] = currentValueStr;
+                        }
+                        multiInst.lastCheckTime = EditorApplication.timeSinceStartup;
                     }
                 }
             }
@@ -300,10 +306,32 @@ namespace ArchitectureVisualizer
                 {
                     foreach (var instance in step.trackedInstances)
                     {
-                        if (instance.valueLabel != null && instance.highlightStartTime > 0)
+                        if (instance is MultiVarTrackedInstance multiInst)
+                        {
+                            foreach (var kvp in multiInst.valueLabels)
+                            {
+                                string varName = kvp.Key;
+                                var label = kvp.Value;
+                                if (multiInst.highlightStartTimes.ContainsKey(varName) && multiInst.highlightStartTimes[varName] > 0)
+                                {
+                                    double timeSinceChange = EditorApplication.timeSinceStartup - multiInst.highlightStartTimes[varName];
+                                    if (timeSinceChange < 1.0)
+                                    {
+                                        float t = (float)timeSinceChange;
+                                        label.style.color = Color.Lerp(Color.yellow, Color.white, t);
+                                    }
+                                    else
+                                    {
+                                        label.style.color = Color.white;
+                                        multiInst.highlightStartTimes[varName] = 0;
+                                    }
+                                }
+                            }
+                        }
+                        else if (instance.valueLabel != null && instance.highlightStartTime > 0)
                         {
                             double timeSinceChange = EditorApplication.timeSinceStartup - instance.highlightStartTime;
-                            if (timeSinceChange < 1.0) // Highlight for 1 second
+                            if (timeSinceChange < 1.0)
                             {
                                 float t = (float)timeSinceChange;
                                 instance.valueLabel.style.color = Color.Lerp(Color.yellow, Color.white, t);
@@ -311,7 +339,7 @@ namespace ArchitectureVisualizer
                             else
                             {
                                 instance.valueLabel.style.color = Color.white;
-                                instance.highlightStartTime = 0; // Reset highlight
+                                instance.highlightStartTime = 0;
                             }
                         }
                     }
@@ -480,7 +508,8 @@ namespace ArchitectureVisualizer
 
                 foreach (var step in path.steps)
                 {
-                    var stepContainer = new Foldout { text = $"Step: {step.scriptName} -> {step.variableName}", value = true };
+                    var variables = (step.variableNames != null && step.variableNames.Count > 0) ? step.variableNames : new List<string> { step.variableName };
+                    var stepContainer = new Foldout { text = $"Step: {step.scriptName} -> {string.Join(", ", variables)}", value = true };
                     stepContainer.style.marginLeft = 20;
                     pathContainer.Add(stepContainer);
 
@@ -488,8 +517,8 @@ namespace ArchitectureVisualizer
                     var deleteStepButton = new Button(() => DeleteStep(path, step)) { text = "Delete Step" };
                     stepControls.Add(deleteStepButton);
                     stepContainer.Add(stepControls);
-                    
-                    if (step.comment != null && step.comment != "")
+
+                    if (!string.IsNullOrEmpty(step.comment))
                     {
                         stepContainer.Add(new Label($"Comment: {step.comment}"));
                     }
@@ -498,12 +527,16 @@ namespace ArchitectureVisualizer
                     {
                         foreach (var instance in step.trackedInstances)
                         {
-                            if (instance.component != null)
+                            if (instance.component != null && instance is MultiVarTrackedInstance multiInst)
                             {
-                                var instanceLabel = new Label($"  - {instance.component.gameObject.name}: {instance.lastValue}");
-                                instance.valueLabel = instanceLabel; // Link label to instance
-                                _instanceLabels[instance.instanceId] = instanceLabel;
-                                stepContainer.Add(instanceLabel);
+                                foreach (var varName in variables)
+                                {
+                                    string val = multiInst.lastValues.ContainsKey(varName) ? multiInst.lastValues[varName] : "null";
+                                    var instanceLabel = new Label($"  - {multiInst.component.gameObject.name} [{varName}]: {val}");
+                                    multiInst.valueLabels[varName] = instanceLabel;
+                                    _instanceLabels[multiInst.instanceId] = instanceLabel;
+                                    stepContainer.Add(instanceLabel);
+                                }
                             }
                         }
                     }
@@ -605,7 +638,7 @@ namespace ArchitectureVisualizer
         private string pathName = "";
         private string comment = "";
         private string selectedScript = "";
-        private string selectedVariable = "";
+        private List<string> selectedVariables = new List<string>();
         private List<string> availableScripts = new List<string>();
         private Dictionary<string, List<string>> scriptVariables = new Dictionary<string, List<string>>();
         private Vector2 scrollPos;
@@ -613,6 +646,7 @@ namespace ArchitectureVisualizer
         private void OnEnable()
         {
             LoadAvailableScripts();
+            if (selectedVariables.Count == 0) selectedVariables.Add("");
         }
 
         private void LoadAvailableScripts()
@@ -639,13 +673,13 @@ namespace ArchitectureVisualizer
             availableScripts = availableScripts.OrderBy(s => s).ToList();
         }
 
-        private void UpdateVariableDropdown()
+        private void UpdateVariableDropdown(int index)
         {
             if (!string.IsNullOrEmpty(selectedScript) && scriptVariables.ContainsKey(selectedScript))
             {
                 var vars = scriptVariables[selectedScript];
                 if (vars.Count > 0)
-                    selectedVariable = vars[0];
+                    selectedVariables[index] = vars[0];
             }
         }
 
@@ -666,14 +700,44 @@ namespace ArchitectureVisualizer
             if (newScriptIdx != scriptIdx)
             {
                 selectedScript = availableScripts[newScriptIdx];
-                UpdateVariableDropdown();
+                selectedVariables = new List<string> { "" };
+                UpdateVariableDropdown(0);
             }
             var vars = scriptVariables.ContainsKey(selectedScript) ? scriptVariables[selectedScript] : new List<string>();
-            int varIdx = vars.IndexOf(selectedVariable);
-            int newVarIdx = EditorGUILayout.Popup("Variable", varIdx >= 0 ? varIdx : 0, vars.ToArray());
-            if (newVarIdx != varIdx && newVarIdx >= 0 && newVarIdx < vars.Count)
+            if (!string.IsNullOrEmpty(selectedScript) && vars.Count > 0)
             {
-                selectedVariable = vars[newVarIdx];
+                GUILayout.Label("Select Variables:");
+                int removeIndex = -1;
+                for (int i = 0; i < selectedVariables.Count; i++)
+                {
+                    int varIdx = vars.IndexOf(selectedVariables[i]);
+                    int newVarIdx = EditorGUILayout.Popup(varIdx >= 0 ? varIdx : 0, vars.ToArray());
+                    if (newVarIdx != varIdx)
+                    {
+                        selectedVariables[i] = vars[newVarIdx];
+                    }
+                    EditorGUILayout.BeginHorizontal();
+                    if (i > 0)
+                    {
+                        if (GUILayout.Button("Remove", GUILayout.Width(60)))
+                        {
+                            removeIndex = i;
+                        }
+                    }
+                    EditorGUILayout.EndHorizontal();
+                }
+                if (removeIndex > -1)
+                {
+                    selectedVariables.RemoveAt(removeIndex);
+                }
+                // Add new field if last is selected
+                if (selectedVariables.Count == 0 || (!string.IsNullOrEmpty(selectedVariables.Last()) && selectedVariables.Count < vars.Count))
+                {
+                    if (GUILayout.Button("Add Variable"))
+                    {
+                        selectedVariables.Add("");
+                    }
+                }
             }
             pathName = EditorGUILayout.TextField("Path name", pathName);
             EditorGUILayout.BeginHorizontal();
@@ -691,18 +755,17 @@ namespace ArchitectureVisualizer
                     description = comment,
                     steps = new List<TrackingStep>()
                 };
-
-                if (!string.IsNullOrEmpty(selectedScript) && !string.IsNullOrEmpty(selectedVariable))
+                if (!string.IsNullOrEmpty(selectedScript) && selectedVariables.Any(v => !string.IsNullOrEmpty(v)))
                 {
                     var firstStep = new TrackingStep
                     {
                         scriptName = selectedScript,
-                        variableName = selectedVariable,
+                        variableNames = selectedVariables.Where(v => !string.IsNullOrEmpty(v)).ToList(),
+                        variableName = selectedVariables.FirstOrDefault(v => !string.IsNullOrEmpty(v)), // для совместимости
                         comment = "Initial step"
                     };
                     newPath.steps.Add(firstStep);
                 }
-                
                 OnPathCreated?.Invoke(newPath);
                 Close();
             }
@@ -718,7 +781,7 @@ namespace ArchitectureVisualizer
         public Action<TrackingStep> OnStepCreated;
         public string selectedFolder = "Assets";
         private string selectedScript = "";
-        private string selectedVariable = "";
+        private List<string> selectedVariables = new List<string>();
         private string comment = "";
         private Vector2 scrollPos;
         private List<string> availableScripts = new List<string>();
@@ -727,6 +790,7 @@ namespace ArchitectureVisualizer
         private void OnEnable()
         {
             LoadAvailableScripts();
+            if (selectedVariables.Count == 0) selectedVariables.Add("");
         }
 
         private void LoadAvailableScripts()
@@ -753,20 +817,20 @@ namespace ArchitectureVisualizer
             availableScripts = availableScripts.OrderBy(s => s).ToList();
         }
 
-        private void UpdateVariableDropdown()
+        private void UpdateVariableDropdown(int index)
         {
             if (!string.IsNullOrEmpty(selectedScript) && scriptVariables.ContainsKey(selectedScript))
             {
                 var vars = scriptVariables[selectedScript];
                 if (vars.Count > 0)
-                    selectedVariable = vars[0];
+                    selectedVariables[index] = vars[0];
             }
         }
 
         private void OnGUI()
         {
             GUILayout.Label("Add New Step", EditorStyles.boldLabel);
-            
+
             GUILayout.Label("Select Script:");
             int selectedScriptIndex = availableScripts.IndexOf(selectedScript);
             int newSelectedScriptIndex = EditorGUILayout.Popup(selectedScriptIndex, availableScripts.ToArray());
@@ -774,33 +838,61 @@ namespace ArchitectureVisualizer
             if (newSelectedScriptIndex != selectedScriptIndex)
             {
                 selectedScript = availableScripts[newSelectedScriptIndex];
-                UpdateVariableDropdown();
+                selectedVariables = new List<string> { "" };
+                UpdateVariableDropdown(0);
             }
 
             if (!string.IsNullOrEmpty(selectedScript) && scriptVariables.ContainsKey(selectedScript))
             {
-                GUILayout.Label("Select Variable:");
-                int selectedVarIndex = scriptVariables[selectedScript].IndexOf(selectedVariable);
-                int newSelectedVarIndex = EditorGUILayout.Popup(selectedVarIndex, scriptVariables[selectedScript].ToArray());
-                if (newSelectedVarIndex != selectedVarIndex)
+                GUILayout.Label("Select Variables:");
+                var vars = scriptVariables[selectedScript];
+                int removeIndex = -1;
+                for (int i = 0; i < selectedVariables.Count; i++)
                 {
-                    selectedVariable = scriptVariables[selectedScript][newSelectedVarIndex];
+                    int varIdx = vars.IndexOf(selectedVariables[i]);
+                    int newVarIdx = EditorGUILayout.Popup(varIdx >= 0 ? varIdx : 0, vars.ToArray());
+                    if (newVarIdx != varIdx)
+                    {
+                        selectedVariables[i] = vars[newVarIdx];
+                    }
+                    EditorGUILayout.BeginHorizontal();
+                    if (i > 0)
+                    {
+                        if (GUILayout.Button("Удалить", GUILayout.Width(60)))
+                        {
+                            removeIndex = i;
+                        }
+                    }
+                    EditorGUILayout.EndHorizontal();
+                }
+                if (removeIndex > -1)
+                {
+                    selectedVariables.RemoveAt(removeIndex);
+                }
+                // Добавить новое поле, если последнее выбрано
+                if (selectedVariables.Count == 0 || (!string.IsNullOrEmpty(selectedVariables.Last()) && selectedVariables.Count < vars.Count))
+                {
+                    if (GUILayout.Button("Добавить переменную"))
+                    {
+                        selectedVariables.Add("");
+                    }
                 }
             }
 
             GUILayout.Label("Comment:");
             comment = EditorGUILayout.TextArea(comment, GUILayout.Height(60));
-            
+
             GUILayout.Space(10);
 
             if (GUILayout.Button("Add Step"))
             {
-                if (!string.IsNullOrEmpty(selectedScript) && !string.IsNullOrEmpty(selectedVariable))
+                if (!string.IsNullOrEmpty(selectedScript) && selectedVariables.Any(v => !string.IsNullOrEmpty(v)))
                 {
                     var newStep = new TrackingStep
                     {
                         scriptName = selectedScript,
-                        variableName = selectedVariable,
+                        variableNames = selectedVariables.Where(v => !string.IsNullOrEmpty(v)).ToList(),
+                        variableName = selectedVariables.FirstOrDefault(v => !string.IsNullOrEmpty(v)), // для совместимости
                         comment = comment
                     };
                     OnStepCreated?.Invoke(newStep);
@@ -808,7 +900,7 @@ namespace ArchitectureVisualizer
                 }
                 else
                 {
-                    EditorUtility.DisplayDialog("Error", "Please select a script and a variable.", "OK");
+                    EditorUtility.DisplayDialog("Error", "Please select a script and at least one variable.", "OK");
                 }
             }
 
@@ -904,5 +996,13 @@ namespace ArchitectureVisualizer
                 Close();
             }
         }
+    }
+
+    [Serializable]
+    public class MultiVarTrackedInstance : TrackedInstance
+    {
+        public Dictionary<string, string> lastValues = new Dictionary<string, string>();
+        public Dictionary<string, double> highlightStartTimes = new Dictionary<string, double>();
+        public Dictionary<string, Label> valueLabels = new Dictionary<string, Label>();
     }
 } 

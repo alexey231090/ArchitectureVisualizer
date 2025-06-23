@@ -26,6 +26,7 @@ namespace ArchitectureVisualizer
     {
         public string scriptName;
         public string variableName;
+        public List<string> variableNames = new List<string>();
         public string comment;
         public List<TrackedInstance> trackedInstances = new List<TrackedInstance>();
     }
