@@ -276,7 +276,7 @@ namespace ArchitectureVisualizer
                         // Update UI label if it exists
                         if (trackedInstance.valueLabel != null)
                         {
-                            trackedInstance.valueLabel.text = $"Value: {currentValueStr}";
+                            trackedInstance.valueLabel.text = $"  - {trackedInstance.component.gameObject.name}: {currentValueStr}";
                         }
 
                         if (trackedInstance.lastValue != null && trackedInstance.lastValue != currentValueStr)
@@ -323,21 +323,65 @@ namespace ArchitectureVisualizer
         {
             if (source == null || string.IsNullOrEmpty(name)) return null;
 
-            var type = source.GetType();
+            // Case 1: Dot notation (e.g., player.health or inventory[0].name)
+            var pathParts = name.Split(new[] { '.' }, 2);
+            if (pathParts.Length > 1)
+            {
+                var currentPart = pathParts[0];
+                var restOfPath = pathParts[1];
+                var intermediateObject = GetValue(source, currentPart); // Recurse for the first part
+                if (intermediateObject == null) return null;
+                return GetValue(intermediateObject, restOfPath); // Recurse for the rest of the path
+            }
+
+            // Case 2: Index/Key access (e.g., inventory[0] or myDict["key"])
+            var match = Regex.Match(name, @"(.+?)\[(.+)\]$");
+            if (match.Success)
+            {
+                var collectionName = match.Groups[1].Value;
+                var accessor = match.Groups[2].Value;
+                var collection = GetValue(source, collectionName);
+
+                if (collection == null) return null;
+                
+                // Dictionary access with string key: myDict["key"]
+                if (accessor.StartsWith("\"") && accessor.EndsWith("\""))
+                {
+                    var key = accessor.Substring(1, accessor.Length - 2);
+                    if (collection is IDictionary dictionary && dictionary.Contains(key))
+                    {
+                        return dictionary[key];
+                    }
+                }
+                // List/Array access with integer index: anArray[0]
+                else if (int.TryParse(accessor, out var index) && collection is IEnumerable enumerable)
+                {
+                    if (enumerable is IList list)
+                    {
+                        if (index < list.Count) return list[index];
+                    }
+                    else
+                    {
+                        int currentIndex = 0;
+                        foreach (var item in enumerable)
+                        {
+                            if (currentIndex == index) return item;
+                            currentIndex++;
+                        }
+                    }
+                }
+                return null; // Accessor type not supported or key/index out of bounds
+            }
             
+            // Case 3: Base case, simple field/property
+            var type = source.GetType();
             while (type != null)
             {
                 var field = type.GetField(name, BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly);
-                if (field != null)
-                {
-                    return field.GetValue(source);
-                }
+                if (field != null) return field.GetValue(source);
 
                 var property = type.GetProperty(name, BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly);
-                if (property != null)
-                {
-                    return property.GetValue(source, null);
-                }
+                if (property != null) return property.GetValue(source, null);
                 
                 type = type.BaseType;
             }
