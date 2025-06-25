@@ -334,7 +334,7 @@ namespace ArchitectureVisualizer
                             string typeStr = currentValue != null ? currentValue.GetType().Name : "null";
                             if (multiInst.valueLabels.ContainsKey(varName))
                             {
-                                multiInst.valueLabels[varName].text = $"  - {gameObjectName} [{varName} ({typeStr})]: {currentValueStr}";
+                                multiInst.valueLabels[varName].text = $"{gameObjectName} [{varName} ({typeStr})]: {currentValueStr}";
                             }
                             if (multiInst.lastValues.ContainsKey(varName) && multiInst.lastValues[varName] != currentValueStr)
                             {
@@ -647,21 +647,18 @@ namespace ArchitectureVisualizer
                                 instanceContainer.AddToClassList("et-instance-container");
                                 valuesContainer.Add(instanceContainer);
 
-                                var instanceNameLabel = new Label(gameObjectName);
-                                instanceNameLabel.AddToClassList("et-instance-name");
-                                instanceContainer.Add(instanceNameLabel);
-
                                 foreach (var varName in variables)
                                 {
                                     string val = multiInst.lastValues.TryGetValue(varName, out var value) ? value : "[No value]";
                                     Label valueLabel;
+                                    string typeStr = val != "[No value]" && val != null ? val.GetType().Name : "null";
                                     if (variables.Count == 1)
                                     {
-                                        valueLabel = new Label(val); // Только значение
+                                        valueLabel = new Label($"{gameObjectName} [{varName} ({typeStr})]: {val}"); // Только переменная и значение
                                     }
                                     else
                                     {
-                                        valueLabel = new Label($"{varName}: {val}"); // Имя: значение
+                                        valueLabel = new Label($"{gameObjectName} [{varName} ({typeStr})]: {val}"); // Имя переменной и значение
                                     }
                                     valueLabel.AddToClassList("et-value-label");
                                     if (multiInst.valueLabels == null)
@@ -675,10 +672,19 @@ namespace ArchitectureVisualizer
                         }
                     }
 
-                    var deleteStepButton = new Button(() => DeleteStep(path, step)) { text = "Delete Step" };
+                    var deleteStepButton = new Button(() => DeleteStep(path, step));
                     deleteStepButton.AddToClassList("et-button");
                     deleteStepButton.AddToClassList("et-button--danger");
-                    stepColumn.Add(deleteStepButton);
+                    deleteStepButton.style.width = 24;
+                    deleteStepButton.style.height = 24;
+                    deleteStepButton.style.minWidth = 24;
+                    deleteStepButton.style.minHeight = 24;
+                    deleteStepButton.style.maxWidth = 24;
+                    deleteStepButton.style.maxHeight = 24;
+                    deleteStepButton.text = "✖";
+                    deleteStepButton.style.unityFontStyleAndWeight = FontStyle.Bold;
+                    deleteStepButton.style.fontSize = 16;
+                    stepColumn.Insert(0, deleteStepButton);
                     
                     stepsRow.Add(stepColumn);
                 }
