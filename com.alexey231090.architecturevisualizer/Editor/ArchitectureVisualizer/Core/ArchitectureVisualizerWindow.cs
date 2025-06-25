@@ -12,6 +12,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Collections.Specialized;
 using ArchitectureVisualizer;
+using TMPro;
 
 namespace ArchitectureVisualizer
 {
@@ -71,6 +72,30 @@ namespace ArchitectureVisualizer
             
             // Очищаем корневой элемент перед созданием нового UI
             rootVisualElement.Clear();
+
+            // Более надежный способ найти и загрузить файл стилей
+            try
+            {
+                var windowScript = MonoScript.FromScriptableObject(this);
+                var scriptPath = AssetDatabase.GetAssetPath(windowScript);
+                var scriptFolder = System.IO.Path.GetDirectoryName(scriptPath); // Папка Core
+                var resourcePath = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(scriptFolder), "Resources", "styles.uss");
+                resourcePath = resourcePath.Replace('\\', '/');
+                
+                var styleSheet = AssetDatabase.LoadAssetAtPath<StyleSheet>(resourcePath);
+                if (styleSheet != null)
+                {
+                    rootVisualElement.styleSheets.Add(styleSheet);
+                }
+                else
+                {
+                    Debug.LogError($"Stylesheet not found at path '{resourcePath}'. Make sure it's in the correct folder relative to the script.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error loading stylesheet: {ex.Message}");
+            }
             
             rootVisualElement.style.flexDirection = FlexDirection.Column;
 
@@ -231,7 +256,9 @@ namespace ArchitectureVisualizer
             {
                 foreach (var step in path.steps)
                 {
-                    var variables = (step.variableNames != null && step.variableNames.Count > 0) ? step.variableNames : new List<string> { step.variableName };
+                    var variables = (step.variableNames != null && step.variableNames.Count > 0)
+                        ? step.variableNames
+                        : (!string.IsNullOrEmpty(step.variableName) ? new List<string> { step.variableName } : new List<string>());
                     
                     List<object> targetObjects = new List<object>();
 
@@ -304,17 +331,15 @@ namespace ArchitectureVisualizer
                             object currentValue = GetValue(obj, varName);
                             string currentValueStr = GetValueAsString(currentValue);
                             string gameObjectName = component != null ? component.gameObject.name : obj.GetType().Name;
-
+                            string typeStr = currentValue != null ? currentValue.GetType().Name : "null";
                             if (multiInst.valueLabels.ContainsKey(varName))
                             {
-                                multiInst.valueLabels[varName].text = $"  - {gameObjectName} [{varName}]: {currentValueStr}";
+                                multiInst.valueLabels[varName].text = $"  - {gameObjectName} [{varName} ({typeStr})]: {currentValueStr}";
                             }
-
                             if (multiInst.lastValues.ContainsKey(varName) && multiInst.lastValues[varName] != currentValueStr)
                             {
                                 multiInst.highlightStartTimes[varName] = EditorApplication.timeSinceStartup;
                             }
-
                             multiInst.lastValues[varName] = currentValueStr;
                         }
                         multiInst.lastCheckTime = EditorApplication.timeSinceStartup;
@@ -446,23 +471,42 @@ namespace ArchitectureVisualizer
         {
             if (value == null) return "null";
 
+            // Проверка на уничтоженный UnityEngine.Object
+            if (value is UnityEngine.Object unityObj)
+            {
+                if (unityObj == null)
+                {
+                    return "[Destroyed]";
+                }
+            }
+            // Специальная обработка для TextMeshProUGUI
+            if (value is TMPro.TextMeshProUGUI tmp)
+            {
+                return tmp.text;
+            }
+            // Для других UnityEngine.Object выводим имя объекта
+            if (value is UnityEngine.Object unityObj2 && !(value is string))
+            {
+                return unityObj2.name;
+            }
+            // Для коллекций
             if (value is IEnumerable collection && !(value is string))
             {
                 var items = new List<string>();
                 int count = 0;
                 foreach (var item in collection)
                 {
-                    if (count >= 10) // Ограничиваем количество для отображения
+                    if (count >= 10)
                     {
                         items.Add("...");
                         break;
                     }
-                    items.Add(item != null ? item.ToString() : "null");
+                    items.Add(item != null ? GetValueAsString(item) : "null");
                     count++;
                 }
                 return $"[{string.Join(", ", items)}]";
             }
-
+            // Для остальных типов выводим только значение
             return value.ToString();
         }
 
@@ -497,57 +541,100 @@ namespace ArchitectureVisualizer
 
         private void UpdateScriptDetails()
         {
-            ScriptDetailsViewBuilder.UpdateScriptDetails(scriptDetailsContainer, selectedFolder);
+            // Эта функция будет удалена, оставляем заглушку
         }
-
+        
         private void UpdateEventTracking()
         {
+            if (eventTrackingContainer == null) return;
             eventTrackingContainer.Clear();
-            _instanceLabels.Clear();
 
-            // Заголовок
-            var headerContainer = new VisualElement { style = { flexDirection = FlexDirection.Row, alignItems = Align.Center, marginBottom = 10 } };
-            var titleLabel = new Label("Event Tracking") { style = { fontSize = 16, unityFontStyleAndWeight = FontStyle.Bold, marginRight = 20 } };
-            var addButton = new Button(() => ShowAddPathDialog()) { text = "Add Path" };
-            headerContainer.Add(titleLabel);
-            headerContainer.Add(addButton);
-            eventTrackingContainer.Add(headerContainer);
+            // Контейнер для кнопки "Add Path"
+            var controlsContainer = new VisualElement();
+            controlsContainer.AddToClassList("et-controls-container");
+            var addPathButton = new Button(ShowAddPathDialog) { text = "Add New Path" };
+            addPathButton.AddToClassList("et-button");
+            addPathButton.AddToClassList("et-button--add");
+            controlsContainer.Add(addPathButton);
+            eventTrackingContainer.Add(controlsContainer);
 
-            // Список путей
+            // Отрисовка каждого пути как сворачиваемого блока
             foreach (var path in EventTrackingManager.TrackingPaths)
             {
-                var pathContainer = new Foldout { text = $"{path.pathName} ({(path.isTracking ? "Tracking" : "Stopped")})", value = true };
-                pathContainer.style.marginTop = 5;
+                var pathContainer = new Foldout();
+                pathContainer.text = path.pathName;
+                pathContainer.value = path.isExpanded;
+                pathContainer.RegisterValueChangedCallback(evt => path.isExpanded = evt.newValue);
+                pathContainer.AddToClassList("et-path-container");
                 eventTrackingContainer.Add(pathContainer);
 
-                var pathControls = new VisualElement { style = { flexDirection = FlexDirection.Row, marginTop = 5 } };
-                var toggleButton = new Button(() => ToggleTracking(path)) { text = path.isTracking ? "Stop" : "Start" };
-                var editButton = new Button(() => ShowEditPathDialog(path)) { text = "Edit" };
-                var deleteButton = new Button(() => DeletePath(path)) { text = "Delete" };
-                var addStepButton = new Button(() => ShowAddStepDialog(path)) { text = "Add Step" };
+                // --- Содержимое Foldout для каждого пути ---
 
-                pathControls.Add(toggleButton);
+                var pathControls = new VisualElement();
+                pathControls.AddToClassList("et-path-controls");
+                
+                var trackButton = new Button(() => ToggleTracking(path)) { text = path.isTracking ? "Stop" : "Track" };
+                trackButton.AddToClassList("et-button");
+                trackButton.AddToClassList(path.isTracking ? "et-button--stop" : "et-button--track");
+                pathControls.Add(trackButton);
+
+                var editButton = new Button(() => ShowEditPathDialog(path)) { text = "Edit" };
+                editButton.AddToClassList("et-button");
                 pathControls.Add(editButton);
+
+                var deleteButton = new Button(() => DeletePath(path)) { text = "Delete" };
+                deleteButton.AddToClassList("et-button");
+                deleteButton.AddToClassList("et-button--danger");
                 pathControls.Add(deleteButton);
-                pathControls.Add(addStepButton);
+                
                 pathContainer.Add(pathControls);
 
+                if (!string.IsNullOrEmpty(path.description))
+                {
+                    var descriptionLabel = new Label(path.description);
+                    descriptionLabel.AddToClassList("et-step-comment");
+                    pathContainer.Add(descriptionLabel);
+                }
+                
+                var addStepButton = new Button(() => ShowAddStepDialog(path)) { text = "Add Step" };
+                addStepButton.AddToClassList("et-button");
+                pathContainer.Add(addStepButton);
+
+                // Горизонтальный ScrollView для шагов
+                var stepsScrollView = new ScrollView(ScrollViewMode.Horizontal);
+                stepsScrollView.AddToClassList("et-steps-scrollview");
+                pathContainer.Add(stepsScrollView);
+
+                // Контейнер для строки шагов
+                var stepsRow = new VisualElement();
+                stepsRow.AddToClassList("et-steps-row");
+                stepsScrollView.Add(stepsRow);
+
+                // Отрисовка каждого шага как колонки в горизонтальном ряду
                 foreach (var step in path.steps)
                 {
-                    var variables = (step.variableNames != null && step.variableNames.Count > 0) ? step.variableNames : new List<string> { step.variableName };
-                    var stepContainer = new Foldout { text = $"Step: {step.scriptName} -> {string.Join(", ", variables)}", value = true };
-                    stepContainer.style.marginLeft = 20;
-                    pathContainer.Add(stepContainer);
+                    var stepColumn = new VisualElement();
+                    stepColumn.AddToClassList("et-step-column");
 
-                    var stepControls = new VisualElement { style = { flexDirection = FlexDirection.Row, marginTop = 5 } };
-                    var deleteStepButton = new Button(() => DeleteStep(path, step)) { text = "Delete Step" };
-                    stepControls.Add(deleteStepButton);
-                    stepContainer.Add(stepControls);
-
+                    // Получаем переменные для шага без дублирования
+                    List<string> variables = (step.variableNames != null && step.variableNames.Count > 0)
+                        ? step.variableNames
+                        : (!string.IsNullOrEmpty(step.variableName) ? new List<string> { step.variableName } : new List<string>());
+                    var stepLabelText = $"{step.scriptName} ({string.Join(", ", variables)})";
+                    var stepLabel = new Label(stepLabelText);
+                    stepLabel.AddToClassList("et-step-label");
+                    stepColumn.Add(stepLabel);
+                    
                     if (!string.IsNullOrEmpty(step.comment))
                     {
-                        stepContainer.Add(new Label($"Comment: {step.comment}"));
+                        var commentLabel = new Label(step.comment);
+                        commentLabel.AddToClassList("et-step-comment");
+                        stepColumn.Add(commentLabel);
                     }
+                    
+                    var valuesContainer = new VisualElement { name = "values-container" };
+                    valuesContainer.AddToClassList("et-values-container");
+                    stepColumn.Add(valuesContainer);
 
                     if (path.isTracking)
                     {
@@ -555,18 +642,45 @@ namespace ArchitectureVisualizer
                         {
                             if (instance is MultiVarTrackedInstance multiInst)
                             {
-                                string gameObjectName = multiInst.component != null ? multiInst.component.gameObject.name : multiInst.GetType().Name;
+                                string gameObjectName = multiInst.component != null ? multiInst.component.gameObject.name : "[Instance]";
+                                var instanceContainer = new VisualElement();
+                                instanceContainer.AddToClassList("et-instance-container");
+                                valuesContainer.Add(instanceContainer);
+
+                                var instanceNameLabel = new Label(gameObjectName);
+                                instanceNameLabel.AddToClassList("et-instance-name");
+                                instanceContainer.Add(instanceNameLabel);
+
                                 foreach (var varName in variables)
                                 {
-                                    string val = multiInst.lastValues.ContainsKey(varName) ? multiInst.lastValues[varName] : "null";
-                                    var instanceLabel = new Label($"  - {gameObjectName} [{varName}]: {val}");
-                                    multiInst.valueLabels[varName] = instanceLabel;
-                                    _instanceLabels[multiInst.instanceId] = instanceLabel;
-                                    stepContainer.Add(instanceLabel);
+                                    string val = multiInst.lastValues.TryGetValue(varName, out var value) ? value : "[No value]";
+                                    Label valueLabel;
+                                    if (variables.Count == 1)
+                                    {
+                                        valueLabel = new Label(val); // Только значение
+                                    }
+                                    else
+                                    {
+                                        valueLabel = new Label($"{varName}: {val}"); // Имя: значение
+                                    }
+                                    valueLabel.AddToClassList("et-value-label");
+                                    if (multiInst.valueLabels == null)
+                                    {
+                                        multiInst.valueLabels = new Dictionary<string, Label>();
+                                    }
+                                    multiInst.valueLabels[varName] = valueLabel;
+                                    instanceContainer.Add(valueLabel);
                                 }
                             }
                         }
                     }
+
+                    var deleteStepButton = new Button(() => DeleteStep(path, step)) { text = "Delete Step" };
+                    deleteStepButton.AddToClassList("et-button");
+                    deleteStepButton.AddToClassList("et-button--danger");
+                    stepColumn.Add(deleteStepButton);
+                    
+                    stepsRow.Add(stepColumn);
                 }
             }
         }

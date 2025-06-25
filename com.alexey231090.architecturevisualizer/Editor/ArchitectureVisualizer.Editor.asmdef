@@ -1,7 +1,9 @@
 {
     "name": "ArchitectureVisualizer.Editor",
     "rootNamespace": "ArchitectureVisualizer",
-    "references": [],
+    "references": [
+        "Unity.TextMeshPro"
+    ],
     "includePlatforms": [
         "Editor"
     ],

@@ -43,6 +43,7 @@ namespace ArchitectureVisualizer
         public List<TrackingStep> steps = new List<TrackingStep>();
         public bool isTracking;
         public string lastUpdateTime;
+        public bool isExpanded = true;
     }
     
     // Helper for serializing lists
