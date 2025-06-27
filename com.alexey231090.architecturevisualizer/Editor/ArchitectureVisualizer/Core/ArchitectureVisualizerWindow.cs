@@ -172,6 +172,9 @@ namespace ArchitectureVisualizer
 
         private void AnalyzeProject()
         {
+            // Подгружаем оба json-файла заново
+            EventTrackingManager.LoadPaths();
+
             Debug.Log("Starting project analysis...");
             try
             {
@@ -558,7 +561,7 @@ namespace ArchitectureVisualizer
             controlsContainer.Add(addPathButton);
             eventTrackingContainer.Add(controlsContainer);
 
-            // Отрисовка каждого пути как сворачиваемого блока
+            // Отрисовка каждого пути как сворачиваемого блока (основные)
             foreach (var path in EventTrackingManager.TrackingPaths)
             {
                 var pathContainer = new Foldout();
@@ -686,6 +689,71 @@ namespace ArchitectureVisualizer
                     deleteStepButton.style.fontSize = 16;
                     stepColumn.Insert(0, deleteStepButton);
                     
+                    stepsRow.Add(stepColumn);
+                }
+            }
+
+            // --- AI-пути ---
+            foreach (var aiPath in typeof(EventTrackingManager).GetField("AiTrackingPaths", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static).GetValue(null) as List<TrackingPath>)
+            {
+                var pathContainer = new Foldout();
+                pathContainer.text = $"[AI] {aiPath.pathName}";
+                pathContainer.value = aiPath.isExpanded;
+                pathContainer.RegisterValueChangedCallback(evt => aiPath.isExpanded = evt.newValue);
+                pathContainer.AddToClassList("et-path-container");
+                pathContainer.style.backgroundColor = new Color(0.18f, 0.18f, 0.28f); // Отличие по цвету
+                eventTrackingContainer.Add(pathContainer);
+
+                var pathControls = new VisualElement();
+                pathControls.AddToClassList("et-path-controls");
+
+                var acceptButton = new Button(() => {
+                    EventTrackingManager.AcceptAiPath(aiPath);
+                    UpdateEventTracking();
+                }) { text = "✔ Принять" };
+                acceptButton.AddToClassList("et-button");
+                acceptButton.style.backgroundColor = new Color(0.2f, 0.5f, 0.2f);
+                pathControls.Add(acceptButton);
+
+                var aiLabel = new Label("AI Suggestion");
+                aiLabel.style.color = new Color(0.7f, 0.7f, 1f);
+                aiLabel.style.marginLeft = 8;
+                pathControls.Add(aiLabel);
+
+                pathContainer.Add(pathControls);
+
+                if (!string.IsNullOrEmpty(aiPath.description))
+                {
+                    var descriptionLabel = new Label(aiPath.description);
+                    descriptionLabel.AddToClassList("et-step-comment");
+                    pathContainer.Add(descriptionLabel);
+                }
+
+                var stepsScrollView = new ScrollView(ScrollViewMode.Horizontal);
+                stepsScrollView.AddToClassList("et-steps-scrollview");
+                pathContainer.Add(stepsScrollView);
+
+                var stepsRow = new VisualElement();
+                stepsRow.AddToClassList("et-steps-row");
+                stepsScrollView.Add(stepsRow);
+
+                foreach (var step in aiPath.steps)
+                {
+                    var stepColumn = new VisualElement();
+                    stepColumn.AddToClassList("et-step-column");
+                    var variables = (step.variableNames != null && step.variableNames.Count > 0)
+                        ? step.variableNames
+                        : (!string.IsNullOrEmpty(step.variableName) ? new List<string> { step.variableName } : new List<string>());
+                    var stepLabelText = $"{step.scriptName} ({string.Join(", ", variables)})";
+                    var stepLabel = new Label(stepLabelText);
+                    stepLabel.AddToClassList("et-step-label");
+                    stepColumn.Add(stepLabel);
+                    if (!string.IsNullOrEmpty(step.comment))
+                    {
+                        var commentLabel = new Label(step.comment);
+                        commentLabel.AddToClassList("et-step-comment");
+                        stepColumn.Add(commentLabel);
+                    }
                     stepsRow.Add(stepColumn);
                 }
             }

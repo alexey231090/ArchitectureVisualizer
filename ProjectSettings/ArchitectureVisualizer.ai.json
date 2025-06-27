@@ -1,0 +1,41 @@
+{
+  "items": [
+    {
+      "pathName": "Сохранение патронов при завершении уровня",
+      "description": "Пошаговое сохранение количества патронов для каждого оружия при переходе на следующий уровень.",
+      "steps": [
+        {
+          "scriptName": "TriggerFinish",
+          "variableNames": ["OnSaveData"],
+          "comment": "Событие, инициирующее сохранение данных при входе игрока в триггер финиша."
+        },
+        {
+          "scriptName": "PlayerDataManager",
+          "variableNames": ["SaveDataForCurrentScene", "GunAmmo", "BennelliAmmo", "Ak74Ammo"],
+          "comment": "Метод, который сохраняет текущее количество патронов для каждого оружия в PlayerPrefs и массивы."
+        },
+        {
+          "scriptName": "PlayerSwitchingStates",
+          "variableNames": ["weaponBullets"],
+          "comment": "Словарь, из которого берутся актуальные значения патронов для сохранения."
+        },
+        {
+          "scriptName": "PlayerPrefs",
+          "variableNames": ["GunAmmo_Level_X", "BennelliAmmo_Level_X", "Ak74Ammo_Level_X"],
+          "comment": "Ключи, по которым сохраняются значения патронов для следующего уровня."
+        }
+      ]
+    },
+    {
+      "pathName": "Отслеживание жизни зомби",
+      "description": "Путь для дебага переменной жизни зомби.",
+      "steps": [
+        {
+          "scriptName": "FpsZomby.Zombi",
+          "variableNames": ["lifeZombi"],
+          "comment": "Текущее значение жизни зомби."
+        }
+      ]
+    }
+  ]
+} 
