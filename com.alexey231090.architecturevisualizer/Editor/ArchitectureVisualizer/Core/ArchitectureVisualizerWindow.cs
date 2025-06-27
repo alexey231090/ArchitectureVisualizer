@@ -581,8 +581,9 @@ namespace ArchitectureVisualizer
                 trackButton.AddToClassList(path.isTracking ? "et-button--stop" : "et-button--track");
                 pathControls.Add(trackButton);
 
-                var editButton = new Button(() => ShowEditPathDialog(path)) { text = "Edit" };
+                var editButton = new Button(() => ShowEditPathDialog(path)) { text = "✎" };
                 editButton.AddToClassList("et-button");
+                editButton.tooltip = "Редактировать путь";
                 pathControls.Add(editButton);
 
                 var deleteButton = new Button(() => DeletePath(path)) { text = "Delete" };
@@ -619,6 +620,11 @@ namespace ArchitectureVisualizer
                     var stepColumn = new VisualElement();
                     stepColumn.AddToClassList("et-step-column");
 
+                    var stepRow = new VisualElement();
+                    stepRow.style.flexDirection = FlexDirection.Row;
+                    stepRow.style.alignItems = Align.Center;
+                    stepRow.style.justifyContent = Justify.SpaceBetween;
+
                     // Получаем переменные для шага без дублирования
                     List<string> variables = (step.variableNames != null && step.variableNames.Count > 0)
                         ? step.variableNames
@@ -626,13 +632,47 @@ namespace ArchitectureVisualizer
                     var stepLabelText = $"{step.scriptName} ({string.Join(", ", variables)})";
                     var stepLabel = new Label(stepLabelText);
                     stepLabel.AddToClassList("et-step-label");
-                    stepColumn.Add(stepLabel);
+                    stepRow.Add(stepLabel);
+
+                    var deleteStepButton = new Button(() => DeleteStep(path, step));
+                    deleteStepButton.AddToClassList("et-button");
+                    deleteStepButton.AddToClassList("et-button--danger");
+                    deleteStepButton.style.width = 24;
+                    deleteStepButton.style.height = 24;
+                    deleteStepButton.style.minWidth = 24;
+                    deleteStepButton.style.minHeight = 24;
+                    deleteStepButton.style.maxWidth = 24;
+                    deleteStepButton.style.maxHeight = 24;
+                    deleteStepButton.text = "✖";
+                    deleteStepButton.style.unityFontStyleAndWeight = FontStyle.Bold;
+                    deleteStepButton.style.fontSize = 16;
+                    stepRow.Add(deleteStepButton);
+
+                    stepColumn.Add(stepRow);
                     
                     if (!string.IsNullOrEmpty(step.comment))
                     {
+                        var commentRow = new VisualElement();
+                        commentRow.style.flexDirection = FlexDirection.Row;
                         var commentLabel = new Label(step.comment);
                         commentLabel.AddToClassList("et-step-comment");
-                        stepColumn.Add(commentLabel);
+                        commentRow.Add(commentLabel);
+                        var editCommentButton = new Button(() => {
+                            ShowInlineStepCommentEditor(step, path);
+                        }) { text = "✎" };
+                        editCommentButton.AddToClassList("et-button");
+                        editCommentButton.tooltip = "Редактировать комментарий шага";
+                        commentRow.Add(editCommentButton);
+                        stepColumn.Add(commentRow);
+                    }
+                    else
+                    {
+                        var addCommentButton = new Button(() => {
+                            ShowInlineStepCommentEditor(step, path);
+                        }) { text = "✎" };
+                        addCommentButton.AddToClassList("et-button");
+                        addCommentButton.tooltip = "Добавить комментарий";
+                        stepColumn.Add(addCommentButton);
                     }
                     
                     var valuesContainer = new VisualElement { name = "values-container" };
@@ -675,20 +715,6 @@ namespace ArchitectureVisualizer
                         }
                     }
 
-                    var deleteStepButton = new Button(() => DeleteStep(path, step));
-                    deleteStepButton.AddToClassList("et-button");
-                    deleteStepButton.AddToClassList("et-button--danger");
-                    deleteStepButton.style.width = 24;
-                    deleteStepButton.style.height = 24;
-                    deleteStepButton.style.minWidth = 24;
-                    deleteStepButton.style.minHeight = 24;
-                    deleteStepButton.style.maxWidth = 24;
-                    deleteStepButton.style.maxHeight = 24;
-                    deleteStepButton.text = "✖";
-                    deleteStepButton.style.unityFontStyleAndWeight = FontStyle.Bold;
-                    deleteStepButton.style.fontSize = 16;
-                    stepColumn.Insert(0, deleteStepButton);
-                    
                     stepsRow.Add(stepColumn);
                 }
             }
@@ -792,7 +818,7 @@ namespace ArchitectureVisualizer
         private void ShowEditPathDialog(TrackingPath path)
         {
             var window = GetWindow<EditPathWindow>("Edit Path");
-            window.PathToEdit = path;
+            window.SetPath(path);
             window.OnPathEdited = () => {
                 EventTrackingManager.UpdatePath();
                 UpdateEventTracking();
@@ -845,572 +871,602 @@ namespace ArchitectureVisualizer
             }
             return members.Distinct().OrderBy(s => s).ToList();
         }
-    }
 
-    // Вспомогательный класс AddPathWindow
-    public class AddPathWindow : EditorWindow
-    {
-        public Action<TrackingPath> OnPathCreated;
-        public string selectedFolder = "Assets";
-        private string pathName = "";
-        private string comment = "";
-        private string selectedScript = "";
-        private List<string> selectedVariables = new List<string>();
-        private List<string> availableScripts = new List<string>();
-        private Dictionary<string, List<string>> scriptVariables = new Dictionary<string, List<string>>();
-        private Vector2 commentScrollPos;
-        private Dictionary<string, Type> availableScriptTypes = new Dictionary<string, Type>();
-        private bool isCurrentScriptMono = true;
-        private string selectedHostScript = "";
-        private string selectedInstanceField = "";
-        private List<string> availableMonoScripts = new List<string>();
-        private Dictionary<string, List<string>> monoScriptFields = new Dictionary<string, List<string>>();
-
-        private void OnEnable()
+        private void ShowInlineStepCommentEditor(TrackingStep step, TrackingPath path)
         {
-            LoadAvailableScripts();
-            if (selectedVariables.Count == 0) selectedVariables.Add("");
+            StepCommentEditorWindow.Show(step.comment, newComment => {
+                step.comment = newComment;
+                EventTrackingManager.UpdatePath();
+                UpdateEventTracking();
+            });
         }
 
-        private void LoadAvailableScripts()
+        // Вспомогательный класс AddPathWindow
+        public class AddPathWindow : EditorWindow
         {
-            availableScripts.Clear();
-            scriptVariables.Clear();
-            availableMonoScripts.Clear();
-            monoScriptFields.Clear();
-            availableScriptTypes.Clear();
+            public Action<TrackingPath> OnPathCreated;
+            public string selectedFolder = "Assets";
+            private string pathName = "";
+            private string comment = "";
+            private string selectedScript = "";
+            private List<string> selectedVariables = new List<string>();
+            private List<string> availableScripts = new List<string>();
+            private Dictionary<string, List<string>> scriptVariables = new Dictionary<string, List<string>>();
+            private Vector2 commentScrollPos;
+            private Dictionary<string, Type> availableScriptTypes = new Dictionary<string, Type>();
+            private bool isCurrentScriptMono = true;
+            private string selectedHostScript = "";
+            private string selectedInstanceField = "";
+            private List<string> availableMonoScripts = new List<string>();
+            private Dictionary<string, List<string>> monoScriptFields = new Dictionary<string, List<string>>();
 
-            var scriptGuids = AssetDatabase.FindAssets("t:script", new[] { selectedFolder });
-            foreach (var guid in scriptGuids)
+            private void OnEnable()
             {
-                var path = AssetDatabase.GUIDToAssetPath(guid);
-                var script = AssetDatabase.LoadAssetAtPath<MonoScript>(path);
-                if (script != null)
-                {
-                    var type = script.GetClass();
-                    if (type != null)
-                    {
-                        string typeName = type.FullName;
-                        availableScripts.Add(typeName);
-                        scriptVariables[typeName] = ArchitectureVisualizerWindow.GetFieldAndPropertyNames(type);
-                        availableScriptTypes[typeName] = type;
+                LoadAvailableScripts();
+                if (selectedVariables.Count == 0) selectedVariables.Add("");
+            }
 
-                        if (typeof(MonoBehaviour).IsAssignableFrom(type))
+            private void LoadAvailableScripts()
+            {
+                availableScripts.Clear();
+                scriptVariables.Clear();
+                availableMonoScripts.Clear();
+                monoScriptFields.Clear();
+                availableScriptTypes.Clear();
+
+                var scriptGuids = AssetDatabase.FindAssets("t:script", new[] { selectedFolder });
+                foreach (var guid in scriptGuids)
+                {
+                    var path = AssetDatabase.GUIDToAssetPath(guid);
+                    var script = AssetDatabase.LoadAssetAtPath<MonoScript>(path);
+                    if (script != null)
+                    {
+                        var type = script.GetClass();
+                        if (type != null)
                         {
-                            availableMonoScripts.Add(typeName);
-                            monoScriptFields[typeName] = ArchitectureVisualizerWindow.GetFieldAndPropertyNames(type);
+                            string typeName = type.FullName;
+                            availableScripts.Add(typeName);
+                            scriptVariables[typeName] = ArchitectureVisualizerWindow.GetFieldAndPropertyNames(type);
+                            availableScriptTypes[typeName] = type;
+
+                            if (typeof(MonoBehaviour).IsAssignableFrom(type))
+                            {
+                                availableMonoScripts.Add(typeName);
+                                monoScriptFields[typeName] = ArchitectureVisualizerWindow.GetFieldAndPropertyNames(type);
+                            }
                         }
                     }
                 }
+                availableScripts = availableScripts.OrderBy(s => s).ToList();
+                availableMonoScripts = availableMonoScripts.OrderBy(s => s).ToList();
             }
-            availableScripts = availableScripts.OrderBy(s => s).ToList();
-            availableMonoScripts = availableMonoScripts.OrderBy(s => s).ToList();
-        }
 
-        private void UpdateVariableDropdown(int index)
-        {
-            if (!string.IsNullOrEmpty(selectedScript) && scriptVariables.ContainsKey(selectedScript))
+            private void UpdateVariableDropdown(int index)
             {
-                var vars = scriptVariables[selectedScript];
-                if (vars.Count > 0)
-                    selectedVariables[index] = vars[0];
-            }
-        }
-
-        private void OnGUI()
-        {
-            GUILayout.Label("Add new tracking path", EditorStyles.boldLabel);
-
-            var leftAlignedButtonStyle = new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft };
-
-            if (availableScripts.Count == 0)
-            {
-                GUILayout.Label("No scripts found in selected folder.", EditorStyles.wordWrappedLabel);
-                if (GUILayout.Button("Refresh"))
+                if (!string.IsNullOrEmpty(selectedScript) && scriptVariables.ContainsKey(selectedScript))
                 {
-                    LoadAvailableScripts();
+                    var vars = scriptVariables[selectedScript];
+                    if (vars.Count > 0)
+                        selectedVariables[index] = vars[0];
                 }
-                return;
             }
 
-            // Script Selection Button
-            GUILayout.Label("Выберите скрипт:", EditorStyles.wordWrappedLabel);
-            if (GUILayout.Button("Выбрать скрипт"))
+            private void OnGUI()
             {
-                var picker = GetWindow<ScriptPickerWindow>("Выберите скрипт");
-                picker.scriptsToShow = availableScripts;
-                picker.onScriptSelected = (pickedScriptName) => {
-                    if (selectedScript != pickedScriptName)
+                GUILayout.Label("Add new tracking path", EditorStyles.boldLabel);
+
+                var leftAlignedButtonStyle = new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft };
+
+                if (availableScripts.Count == 0)
+                {
+                    GUILayout.Label("No scripts found in selected folder.", EditorStyles.wordWrappedLabel);
+                    if (GUILayout.Button("Refresh"))
                     {
-                        selectedScript = pickedScriptName;
-                        selectedVariables = new List<string> { "" };
-                        UpdateVariableDropdown(0);
-                        var scriptType = availableScriptTypes.ContainsKey(selectedScript) ? availableScriptTypes[selectedScript] : null;
-                        isCurrentScriptMono = scriptType != null && typeof(MonoBehaviour).IsAssignableFrom(scriptType);
-                        if (isCurrentScriptMono)
+                        LoadAvailableScripts();
+                    }
+                    return;
+                }
+
+                // Script Selection Button
+                GUILayout.Label("Выберите скрипт:", EditorStyles.wordWrappedLabel);
+                if (GUILayout.Button("Выбрать скрипт"))
+                {
+                    var picker = GetWindow<ScriptPickerWindow>("Выберите скрипт");
+                    picker.scriptsToShow = availableScripts;
+                    picker.onScriptSelected = (pickedScriptName) => {
+                        if (selectedScript != pickedScriptName)
                         {
-                            selectedHostScript = "";
-                            selectedInstanceField = "";
+                            selectedScript = pickedScriptName;
+                            selectedVariables = new List<string> { "" };
+                            UpdateVariableDropdown(0);
+                            var scriptType = availableScriptTypes.ContainsKey(selectedScript) ? availableScriptTypes[selectedScript] : null;
+                            isCurrentScriptMono = scriptType != null && typeof(MonoBehaviour).IsAssignableFrom(scriptType);
+                            if (isCurrentScriptMono)
+                            {
+                                selectedHostScript = "";
+                                selectedInstanceField = "";
+                            }
                         }
-                    }
-                };
-            }
-            if(!string.IsNullOrEmpty(selectedScript)) GUILayout.Label($"Выбрано: {selectedScript}", EditorStyles.boldLabel);
-
-
-            if (!isCurrentScriptMono && !string.IsNullOrEmpty(selectedScript))
-            {
-                GUILayout.Label("Класс не является MonoBehaviour. Укажите, как найти его экземпляр:", EditorStyles.boldLabel);
-                
-                // Host Component Selection Button
-                GUILayout.Label("1. Выберите компонент, в котором хранится экземпляр:", EditorStyles.wordWrappedLabel);
-                if (GUILayout.Button("Выбрать хост-компонент"))
-                {
-                     var picker = GetWindow<ScriptPickerWindow>("Выберите хост-компонент");
-                     picker.scriptsToShow = availableMonoScripts;
-                     picker.onScriptSelected = (pickedHostName) => {
-                         if (selectedHostScript != pickedHostName)
-                         {
-                             selectedHostScript = pickedHostName;
-                             selectedInstanceField = ""; // Reset field
-                         }
-                     };
-                }
-                 if(!string.IsNullOrEmpty(selectedHostScript)) GUILayout.Label($"Выбрано: {selectedHostScript}", EditorStyles.boldLabel);
-
-
-                if (!string.IsNullOrEmpty(selectedHostScript))
-                {
-                    GUILayout.Label("2. Выберите поле или свойство, содержащее экземпляр:", EditorStyles.wordWrappedLabel);
-                    var fields = monoScriptFields.ContainsKey(selectedHostScript) ? monoScriptFields[selectedHostScript] : new List<string>();
-                    int fieldIndex = fields.IndexOf(selectedInstanceField);
-                    GUILayout.Label("Поле с экземпляром:");
-                    int newFieldIndex = EditorGUILayout.Popup(fieldIndex, fields.ToArray());
-                    if (newFieldIndex != fieldIndex)
-                    {
-                        selectedInstanceField = fields[newFieldIndex];
-                    }
-                }
-                GUILayout.Space(10);
-            }
-
-            var vars = scriptVariables.ContainsKey(selectedScript) ? scriptVariables[selectedScript] : new List<string>();
-            if (!string.IsNullOrEmpty(selectedScript) && vars.Count > 0)
-            {
-                GUILayout.Label("Select Variables:");
-                int removeIndex = -1;
-                for (int i = 0; i < selectedVariables.Count; i++)
-                {
-                    int varIdx = vars.IndexOf(selectedVariables[i]);
-                    int newVarIdx = EditorGUILayout.Popup(varIdx >= 0 ? varIdx : 0, vars.ToArray());
-                    if (newVarIdx != varIdx)
-                    {
-                        selectedVariables[i] = vars[newVarIdx];
-                    }
-                    EditorGUILayout.BeginHorizontal();
-                    if (i > 0)
-                    {
-                        if (GUILayout.Button("Remove", GUILayout.Width(60)))
-                        {
-                            removeIndex = i;
-                        }
-                    }
-                    EditorGUILayout.EndHorizontal();
-                }
-                if (removeIndex > -1)
-                {
-                    selectedVariables.RemoveAt(removeIndex);
-                }
-                // Add new field if last is selected
-                if (selectedVariables.Count == 0 || (!string.IsNullOrEmpty(selectedVariables.Last()) && selectedVariables.Count < vars.Count))
-                {
-                    if (GUILayout.Button("Add Variable"))
-                    {
-                        selectedVariables.Add("");
-                    }
-                }
-            }
-            pathName = EditorGUILayout.TextField("Path name", pathName);
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Comment", GUILayout.Width(70));
-            commentScrollPos = EditorGUILayout.BeginScrollView(commentScrollPos, GUILayout.Height(60));
-            comment = EditorGUILayout.TextArea(comment, GUILayout.ExpandHeight(true));
-            EditorGUILayout.EndScrollView();
-            EditorGUILayout.EndHorizontal();
-            GUILayout.Space(10);
-            if (GUILayout.Button("Create Path"))
-            {
-                var newPath = new TrackingPath
-                {
-                    pathName = pathName,
-                    description = comment,
-                    steps = new List<TrackingStep>()
-                };
-                if (!string.IsNullOrEmpty(selectedScript) && selectedVariables.Any(v => !string.IsNullOrEmpty(v)))
-                {
-                    var firstStep = new TrackingStep
-                    {
-                        scriptName = selectedScript,
-                        variableNames = selectedVariables.Where(v => !string.IsNullOrEmpty(v)).ToList(),
-                        variableName = selectedVariables.FirstOrDefault(v => !string.IsNullOrEmpty(v)),
-                        comment = "Initial step",
-                        isMonoBehaviourTracked = isCurrentScriptMono,
-                        hostScriptName = isCurrentScriptMono ? null : selectedHostScript,
-                        instanceFieldName = isCurrentScriptMono ? null : selectedInstanceField
                     };
-                    newPath.steps.Add(firstStep);
                 }
-                OnPathCreated?.Invoke(newPath);
-                Close();
-            }
-            if (GUILayout.Button("Cancel"))
-            {
-                Close();
-            }
-        }
-    }
+                if(!string.IsNullOrEmpty(selectedScript)) GUILayout.Label($"Выбрано: {selectedScript}", EditorStyles.boldLabel);
 
-    public class AddStepWindow : EditorWindow
-    {
-        public Action<TrackingStep> OnStepCreated;
-        public string selectedFolder = "Assets";
-        private string selectedScript = "";
-        private List<string> selectedVariables = new List<string>();
-        private string comment = "";
-        private Vector2 scrollPos;
-        private List<string> availableScripts = new List<string>();
-        private Dictionary<string, List<string>> scriptVariables = new Dictionary<string, List<string>>();
-        private Dictionary<string, Type> availableScriptTypes = new Dictionary<string, Type>();
-        private bool isCurrentScriptMono = true;
-        private string selectedHostScript = "";
-        private string selectedInstanceField = "";
-        private List<string> availableMonoScripts = new List<string>();
-        private Dictionary<string, List<string>> monoScriptFields = new Dictionary<string, List<string>>();
 
-        private void OnEnable()
-        {
-            LoadAvailableScripts();
-            if (selectedVariables.Count == 0) selectedVariables.Add("");
-        }
-
-        private void LoadAvailableScripts()
-        {
-            availableScripts.Clear();
-            scriptVariables.Clear();
-            availableMonoScripts.Clear();
-            monoScriptFields.Clear();
-            availableScriptTypes.Clear();
-
-            var scriptGuids = AssetDatabase.FindAssets("t:script", new[] { selectedFolder });
-            foreach (var guid in scriptGuids)
-            {
-                var path = AssetDatabase.GUIDToAssetPath(guid);
-                var script = AssetDatabase.LoadAssetAtPath<MonoScript>(path);
-                if (script != null)
+                if (!isCurrentScriptMono && !string.IsNullOrEmpty(selectedScript))
                 {
-                    var type = script.GetClass();
-                    if (type != null)
+                    GUILayout.Label("Класс не является MonoBehaviour. Укажите, как найти его экземпляр:", EditorStyles.boldLabel);
+                    
+                    // Host Component Selection Button
+                    GUILayout.Label("1. Выберите компонент, в котором хранится экземпляр:", EditorStyles.wordWrappedLabel);
+                    if (GUILayout.Button("Выбрать хост-компонент"))
                     {
-                        string typeName = type.FullName;
-                        availableScripts.Add(typeName);
-                        scriptVariables[typeName] = ArchitectureVisualizerWindow.GetFieldAndPropertyNames(type);
-                        availableScriptTypes[typeName] = type;
+                         var picker = GetWindow<ScriptPickerWindow>("Выберите хост-компонент");
+                         picker.scriptsToShow = availableMonoScripts;
+                         picker.onScriptSelected = (pickedHostName) => {
+                             if (selectedHostScript != pickedHostName)
+                             {
+                                 selectedHostScript = pickedHostName;
+                                 selectedInstanceField = ""; // Reset field
+                             }
+                         };
+                    }
+                     if(!string.IsNullOrEmpty(selectedHostScript)) GUILayout.Label($"Выбрано: {selectedHostScript}", EditorStyles.boldLabel);
 
-                        if (typeof(MonoBehaviour).IsAssignableFrom(type))
+
+                    if (!string.IsNullOrEmpty(selectedHostScript))
+                    {
+                        GUILayout.Label("2. Выберите поле или свойство, содержащее экземпляр:", EditorStyles.wordWrappedLabel);
+                        var fields = monoScriptFields.ContainsKey(selectedHostScript) ? monoScriptFields[selectedHostScript] : new List<string>();
+                        int fieldIndex = fields.IndexOf(selectedInstanceField);
+                        GUILayout.Label("Поле с экземпляром:");
+                        int newFieldIndex = EditorGUILayout.Popup(fieldIndex, fields.ToArray());
+                        if (newFieldIndex != fieldIndex)
                         {
-                            availableMonoScripts.Add(typeName);
-                            monoScriptFields[typeName] = ArchitectureVisualizerWindow.GetFieldAndPropertyNames(type);
+                            selectedInstanceField = fields[newFieldIndex];
+                        }
+                    }
+                    GUILayout.Space(10);
+                }
+
+                var vars = scriptVariables.ContainsKey(selectedScript) ? scriptVariables[selectedScript] : new List<string>();
+                if (!string.IsNullOrEmpty(selectedScript) && vars.Count > 0)
+                {
+                    GUILayout.Label("Select Variables:");
+                    int removeIndex = -1;
+                    for (int i = 0; i < selectedVariables.Count; i++)
+                    {
+                        int varIdx = vars.IndexOf(selectedVariables[i]);
+                        int newVarIdx = EditorGUILayout.Popup(varIdx >= 0 ? varIdx : 0, vars.ToArray());
+                        if (newVarIdx != varIdx)
+                        {
+                            selectedVariables[i] = vars[newVarIdx];
+                        }
+                        EditorGUILayout.BeginHorizontal();
+                        if (i > 0)
+                        {
+                            if (GUILayout.Button("Remove", GUILayout.Width(60)))
+                            {
+                                removeIndex = i;
+                            }
+                        }
+                        EditorGUILayout.EndHorizontal();
+                    }
+                    if (removeIndex > -1)
+                    {
+                        selectedVariables.RemoveAt(removeIndex);
+                    }
+                    // Add new field if last is selected
+                    if (selectedVariables.Count == 0 || (!string.IsNullOrEmpty(selectedVariables.Last()) && selectedVariables.Count < vars.Count))
+                    {
+                        if (GUILayout.Button("Add Variable"))
+                        {
+                            selectedVariables.Add("");
                         }
                     }
                 }
-            }
-            availableScripts = availableScripts.OrderBy(s => s).ToList();
-            availableMonoScripts = availableMonoScripts.OrderBy(s => s).ToList();
-        }
-
-        private void UpdateVariableDropdown(int index)
-        {
-            if (!string.IsNullOrEmpty(selectedScript) && scriptVariables.ContainsKey(selectedScript))
-            {
-                var vars = scriptVariables[selectedScript];
-                if (vars.Count > 0)
-                    selectedVariables[index] = vars[0];
-            }
-        }
-
-        private void OnGUI()
-        {
-            GUILayout.Label("Add New Step", EditorStyles.boldLabel);
-
-            var leftAlignedButtonStyle = new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft };
-
-            // Script Selection Button
-            GUILayout.Label("Выберите скрипт:", EditorStyles.wordWrappedLabel);
-             if (GUILayout.Button("Выбрать скрипт"))
-            {
-                var picker = GetWindow<ScriptPickerWindow>("Выберите скрипт");
-                picker.scriptsToShow = availableScripts;
-                picker.onScriptSelected = (pickedScriptName) => {
-                    if (selectedScript != pickedScriptName)
-                    {
-                        selectedScript = pickedScriptName;
-                        selectedVariables = new List<string> { "" };
-                        UpdateVariableDropdown(0);
-                        var scriptType = availableScriptTypes.ContainsKey(selectedScript) ? availableScriptTypes[selectedScript] : null;
-                        isCurrentScriptMono = scriptType != null && typeof(MonoBehaviour).IsAssignableFrom(scriptType);
-                        if (isCurrentScriptMono)
-                        {
-                            selectedHostScript = "";
-                            selectedInstanceField = "";
-                        }
-                    }
-                };
-            }
-            if(!string.IsNullOrEmpty(selectedScript)) GUILayout.Label($"Выбрано: {selectedScript}", EditorStyles.boldLabel);
-
-
-            if (!isCurrentScriptMono && !string.IsNullOrEmpty(selectedScript))
-            {
-                GUILayout.Label("Класс не является MonoBehaviour. Укажите, как найти его экземпляр:", EditorStyles.boldLabel);
-
-                // Host Component Selection Button
-                GUILayout.Label("1. Выберите компонент, в котором хранится экземпляр:", EditorStyles.wordWrappedLabel);
-                if (GUILayout.Button("Выбрать хост-компонент"))
-                {
-                     var picker = GetWindow<ScriptPickerWindow>("Выберите хост-компонент");
-                     picker.scriptsToShow = availableMonoScripts;
-                     picker.onScriptSelected = (pickedHostName) => {
-                         if (selectedHostScript != pickedHostName)
-                         {
-                             selectedHostScript = pickedHostName;
-                             selectedInstanceField = ""; // Reset field
-                         }
-                     };
-                }
-                if(!string.IsNullOrEmpty(selectedHostScript)) GUILayout.Label($"Выбрано: {selectedHostScript}", EditorStyles.boldLabel);
-
-
-                if (!string.IsNullOrEmpty(selectedHostScript))
-                {
-                    GUILayout.Label("2. Выберите поле или свойство, содержащее экземпляр:", EditorStyles.wordWrappedLabel);
-                    var fields = monoScriptFields.ContainsKey(selectedHostScript) ? monoScriptFields[selectedHostScript] : new List<string>();
-                    int fieldIndex = fields.IndexOf(selectedInstanceField);
-                    GUILayout.Label("Поле с экземпляром:");
-                    int newFieldIndex = EditorGUILayout.Popup(fieldIndex, fields.ToArray());
-                    if (newFieldIndex != fieldIndex)
-                    {
-                        selectedInstanceField = fields[newFieldIndex];
-                    }
-                }
+                pathName = EditorGUILayout.TextField("Path name", pathName);
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Comment", GUILayout.Width(70));
+                commentScrollPos = EditorGUILayout.BeginScrollView(commentScrollPos, GUILayout.Height(60));
+                comment = EditorGUILayout.TextArea(comment, GUILayout.ExpandHeight(true));
+                EditorGUILayout.EndScrollView();
+                EditorGUILayout.EndHorizontal();
                 GUILayout.Space(10);
-            }
-
-            if (!string.IsNullOrEmpty(selectedScript) && scriptVariables.ContainsKey(selectedScript))
-            {
-                GUILayout.Label("Select Variables:");
-                var vars = scriptVariables[selectedScript];
-                int removeIndex = -1;
-                for (int i = 0; i < selectedVariables.Count; i++)
+                if (GUILayout.Button("Create Path"))
                 {
-                    int varIdx = vars.IndexOf(selectedVariables[i]);
-                    int newVarIdx = EditorGUILayout.Popup(varIdx >= 0 ? varIdx : 0, vars.ToArray());
-                    if (newVarIdx != varIdx)
+                    var newPath = new TrackingPath
                     {
-                        selectedVariables[i] = vars[newVarIdx];
-                    }
-                    EditorGUILayout.BeginHorizontal();
-                    if (i > 0)
-                    {
-                        if (GUILayout.Button("Удалить", GUILayout.Width(60)))
-                        {
-                            removeIndex = i;
-                        }
-                    }
-                    EditorGUILayout.EndHorizontal();
-                }
-                if (removeIndex > -1)
-                {
-                    selectedVariables.RemoveAt(removeIndex);
-                }
-                // Добавить новое поле, если последнее выбрано
-                if (selectedVariables.Count == 0 || (!string.IsNullOrEmpty(selectedVariables.Last()) && selectedVariables.Count < vars.Count))
-                {
-                    if (GUILayout.Button("Добавить переменную"))
-                    {
-                        selectedVariables.Add("");
-                    }
-                }
-            }
-
-            GUILayout.Label("Comment:");
-            comment = EditorGUILayout.TextArea(comment, GUILayout.Height(60));
-
-            GUILayout.Space(10);
-
-            if (GUILayout.Button("Add Step"))
-            {
-                if (!string.IsNullOrEmpty(selectedScript) && selectedVariables.Any(v => !string.IsNullOrEmpty(v)))
-                {
-                    var newStep = new TrackingStep
-                    {
-                        scriptName = selectedScript,
-                        variableNames = selectedVariables.Where(v => !string.IsNullOrEmpty(v)).ToList(),
-                        variableName = selectedVariables.FirstOrDefault(v => !string.IsNullOrEmpty(v)),
-                        comment = comment,
-                        isMonoBehaviourTracked = isCurrentScriptMono,
-                        hostScriptName = isCurrentScriptMono ? null : selectedHostScript,
-                        instanceFieldName = isCurrentScriptMono ? null : selectedInstanceField
+                        pathName = pathName,
+                        description = comment,
+                        steps = new List<TrackingStep>()
                     };
-                    OnStepCreated?.Invoke(newStep);
+                    if (!string.IsNullOrEmpty(selectedScript) && selectedVariables.Any(v => !string.IsNullOrEmpty(v)))
+                    {
+                        var firstStep = new TrackingStep
+                        {
+                            scriptName = selectedScript,
+                            variableNames = selectedVariables.Where(v => !string.IsNullOrEmpty(v)).ToList(),
+                            variableName = selectedVariables.FirstOrDefault(v => !string.IsNullOrEmpty(v)),
+                            comment = "Initial step",
+                            isMonoBehaviourTracked = isCurrentScriptMono,
+                            hostScriptName = isCurrentScriptMono ? null : selectedHostScript,
+                            instanceFieldName = isCurrentScriptMono ? null : selectedInstanceField
+                        };
+                        newPath.steps.Add(firstStep);
+                    }
+                    OnPathCreated?.Invoke(newPath);
                     Close();
                 }
-                else
+                if (GUILayout.Button("Cancel"))
                 {
-                    EditorUtility.DisplayDialog("Error", "Please select a script and at least one variable.", "OK");
+                    Close();
                 }
             }
-
-            if (GUILayout.Button("Cancel"))
-            {
-                Close();
-            }
-        }
-    }
-
-    public class EditPathWindow : EditorWindow
-    {
-        public TrackingPath PathToEdit;
-        public Action OnPathEdited;
-        public string selectedFolder = "Assets";
-        private string pathName = "";
-        private string description = "";
-        private Vector2 scrollPos;
-
-        private void OnEnable()
-        {
-            if (PathToEdit != null)
-            {
-                pathName = PathToEdit.pathName;
-                description = PathToEdit.description;
-            }
         }
 
-        private void OnGUI()
+        public class AddStepWindow : EditorWindow
         {
-            if (PathToEdit == null)
+            public Action<TrackingStep> OnStepCreated;
+            public string selectedFolder = "Assets";
+            private string selectedScript = "";
+            private List<string> selectedVariables = new List<string>();
+            private string comment = "";
+            private Vector2 scrollPos;
+            private List<string> availableScripts = new List<string>();
+            private Dictionary<string, List<string>> scriptVariables = new Dictionary<string, List<string>>();
+            private Dictionary<string, Type> availableScriptTypes = new Dictionary<string, Type>();
+            private bool isCurrentScriptMono = true;
+            private string selectedHostScript = "";
+            private string selectedInstanceField = "";
+            private List<string> availableMonoScripts = new List<string>();
+            private Dictionary<string, List<string>> monoScriptFields = new Dictionary<string, List<string>>();
+
+            private void OnEnable()
             {
-                GUILayout.Label("No path selected.", EditorStyles.boldLabel);
-                return;
+                LoadAvailableScripts();
+                if (selectedVariables.Count == 0) selectedVariables.Add("");
             }
-            GUILayout.Label("Edit tracking path", EditorStyles.boldLabel);
-            pathName = EditorGUILayout.TextField("Path name", pathName);
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Description", GUILayout.Width(80));
-            scrollPos = EditorGUILayout.BeginScrollView(scrollPos, GUILayout.Height(60));
-            description = EditorGUILayout.TextArea(description, GUILayout.ExpandHeight(true));
-            EditorGUILayout.EndScrollView();
-            EditorGUILayout.EndHorizontal();
-            GUILayout.Space(10);
-            GUILayout.Label("Steps:", EditorStyles.boldLabel);
-            if (PathToEdit.steps != null && PathToEdit.steps.Count > 0)
+
+            private void LoadAvailableScripts()
             {
-                for (int i = 0; i < PathToEdit.steps.Count; i++)
+                availableScripts.Clear();
+                scriptVariables.Clear();
+                availableMonoScripts.Clear();
+                monoScriptFields.Clear();
+                availableScriptTypes.Clear();
+
+                var scriptGuids = AssetDatabase.FindAssets("t:script", new[] { selectedFolder });
+                foreach (var guid in scriptGuids)
                 {
-                    var step = PathToEdit.steps[i];
-                    EditorGUILayout.BeginVertical("box");
-                    EditorGUILayout.LabelField($"Script: {step.scriptName}");
-                    EditorGUILayout.LabelField($"Variable: {step.variableName}");
-                    EditorGUILayout.LabelField("Comment:");
-                    step.comment = EditorGUILayout.TextArea(step.comment, GUILayout.Height(40));
-                    if (GUILayout.Button("Delete Step"))
+                    var path = AssetDatabase.GUIDToAssetPath(guid);
+                    var script = AssetDatabase.LoadAssetAtPath<MonoScript>(path);
+                    if (script != null)
                     {
-                        PathToEdit.steps.RemoveAt(i);
-                        i--;
+                        var type = script.GetClass();
+                        if (type != null)
+                        {
+                            string typeName = type.FullName;
+                            availableScripts.Add(typeName);
+                            scriptVariables[typeName] = ArchitectureVisualizerWindow.GetFieldAndPropertyNames(type);
+                            availableScriptTypes[typeName] = type;
+
+                            if (typeof(MonoBehaviour).IsAssignableFrom(type))
+                            {
+                                availableMonoScripts.Add(typeName);
+                                monoScriptFields[typeName] = ArchitectureVisualizerWindow.GetFieldAndPropertyNames(type);
+                            }
+                        }
                     }
-                    EditorGUILayout.EndVertical();
+                }
+                availableScripts = availableScripts.OrderBy(s => s).ToList();
+                availableMonoScripts = availableMonoScripts.OrderBy(s => s).ToList();
+            }
+
+            private void UpdateVariableDropdown(int index)
+            {
+                if (!string.IsNullOrEmpty(selectedScript) && scriptVariables.ContainsKey(selectedScript))
+                {
+                    var vars = scriptVariables[selectedScript];
+                    if (vars.Count > 0)
+                        selectedVariables[index] = vars[0];
                 }
             }
-            else
+
+            private void OnGUI()
             {
-                GUILayout.Label("No steps in this path.");
-            }
-            if (GUILayout.Button("Add Step"))
-            {
-                var addStepWindow = ScriptableObject.CreateInstance<AddStepWindow>();
-                addStepWindow.titleContent = new GUIContent("Add Step");
-                addStepWindow.selectedFolder = selectedFolder;
-                addStepWindow.OnStepCreated = (newStep) => {
-                    PathToEdit.steps.Add(newStep);
-                    Repaint();
-                };
-                addStepWindow.ShowUtility();
-            }
-            GUILayout.Space(10);
-            if (GUILayout.Button("Сохранить"))
-            {
-                PathToEdit.pathName = pathName;
-                PathToEdit.description = description;
+                GUILayout.Label("Add New Step", EditorStyles.boldLabel);
 
-                // Удаляем шаги, которые были отмечены для удаления
-                // PathToEdit.steps.RemoveAll(s => stepsToRemove.Contains(s));
+                var leftAlignedButtonStyle = new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft };
 
-                OnPathEdited?.Invoke();
-                Close();
-            }
-            if (GUILayout.Button("Cancel"))
-            {
-                Close();
-            }
-        }
-    }
-
-    [Serializable]
-    public class MultiVarTrackedInstance : TrackedInstance
-    {
-        public Dictionary<string, string> lastValues = new Dictionary<string, string>();
-        public Dictionary<string, double> highlightStartTimes = new Dictionary<string, double>();
-        public Dictionary<string, Label> valueLabels = new Dictionary<string, Label>();
-    }
-
-    public class ScriptPickerWindow : EditorWindow
-    {
-        public List<string> scriptsToShow;
-        public Action<string> onScriptSelected;
-        
-        private string searchQuery = "";
-        private Vector2 scrollPos;
-        private GUIStyle leftAlignedButtonStyle;
-
-        void OnEnable()
-        {
-            minSize = new Vector2(300, 400);
-            leftAlignedButtonStyle = new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft };
-        }
-
-        void OnGUI()
-        {
-            GUILayout.Label("Поиск скрипта:", EditorStyles.boldLabel);
-            searchQuery = EditorGUILayout.TextField(searchQuery);
-            
-            var filteredScripts = string.IsNullOrEmpty(searchQuery)
-                ? scriptsToShow
-                : scriptsToShow.Where(s => s.ToLowerInvariant().Contains(searchQuery.ToLowerInvariant())).ToList();
-
-            scrollPos = EditorGUILayout.BeginScrollView(scrollPos);
-            
-            if(filteredScripts != null)
-            {
-                foreach (var scriptName in filteredScripts)
+                // Script Selection Button
+                GUILayout.Label("Выберите скрипт:", EditorStyles.wordWrappedLabel);
+                 if (GUILayout.Button("Выбрать скрипт"))
                 {
-                    if (GUILayout.Button(scriptName, leftAlignedButtonStyle))
+                    var picker = GetWindow<ScriptPickerWindow>("Выберите скрипт");
+                    picker.scriptsToShow = availableScripts;
+                    picker.onScriptSelected = (pickedScriptName) => {
+                        if (selectedScript != pickedScriptName)
+                        {
+                            selectedScript = pickedScriptName;
+                            selectedVariables = new List<string> { "" };
+                            UpdateVariableDropdown(0);
+                            var scriptType = availableScriptTypes.ContainsKey(selectedScript) ? availableScriptTypes[selectedScript] : null;
+                            isCurrentScriptMono = scriptType != null && typeof(MonoBehaviour).IsAssignableFrom(scriptType);
+                            if (isCurrentScriptMono)
+                            {
+                                selectedHostScript = "";
+                                selectedInstanceField = "";
+                            }
+                        }
+                    };
+                }
+                if(!string.IsNullOrEmpty(selectedScript)) GUILayout.Label($"Выбрано: {selectedScript}", EditorStyles.boldLabel);
+
+
+                if (!isCurrentScriptMono && !string.IsNullOrEmpty(selectedScript))
+                {
+                    GUILayout.Label("Класс не является MonoBehaviour. Укажите, как найти его экземпляр:", EditorStyles.boldLabel);
+
+                    // Host Component Selection Button
+                    GUILayout.Label("1. Выберите компонент, в котором хранится экземпляр:", EditorStyles.wordWrappedLabel);
+                    if (GUILayout.Button("Выбрать хост-компонент"))
                     {
-                        onScriptSelected?.Invoke(scriptName);
+                         var picker = GetWindow<ScriptPickerWindow>("Выберите хост-компонент");
+                         picker.scriptsToShow = availableMonoScripts;
+                         picker.onScriptSelected = (pickedHostName) => {
+                             if (selectedHostScript != pickedHostName)
+                             {
+                                 selectedHostScript = pickedHostName;
+                                 selectedInstanceField = ""; // Reset field
+                             }
+                         };
+                    }
+                    if(!string.IsNullOrEmpty(selectedHostScript)) GUILayout.Label($"Выбрано: {selectedHostScript}", EditorStyles.boldLabel);
+
+
+                    if (!string.IsNullOrEmpty(selectedHostScript))
+                    {
+                        GUILayout.Label("2. Выберите поле или свойство, содержащее экземпляр:", EditorStyles.wordWrappedLabel);
+                        var fields = monoScriptFields.ContainsKey(selectedHostScript) ? monoScriptFields[selectedHostScript] : new List<string>();
+                        int fieldIndex = fields.IndexOf(selectedInstanceField);
+                        GUILayout.Label("Поле с экземпляром:");
+                        int newFieldIndex = EditorGUILayout.Popup(fieldIndex, fields.ToArray());
+                        if (newFieldIndex != fieldIndex)
+                        {
+                            selectedInstanceField = fields[newFieldIndex];
+                        }
+                    }
+                    GUILayout.Space(10);
+                }
+
+                if (!string.IsNullOrEmpty(selectedScript) && scriptVariables.ContainsKey(selectedScript))
+                {
+                    GUILayout.Label("Select Variables:");
+                    var vars = scriptVariables[selectedScript];
+                    int removeIndex = -1;
+                    for (int i = 0; i < selectedVariables.Count; i++)
+                    {
+                        int varIdx = vars.IndexOf(selectedVariables[i]);
+                        int newVarIdx = EditorGUILayout.Popup(varIdx >= 0 ? varIdx : 0, vars.ToArray());
+                        if (newVarIdx != varIdx)
+                        {
+                            selectedVariables[i] = vars[newVarIdx];
+                        }
+                        EditorGUILayout.BeginHorizontal();
+                        if (i > 0)
+                        {
+                            if (GUILayout.Button("Удалить", GUILayout.Width(60)))
+                            {
+                                removeIndex = i;
+                            }
+                        }
+                        EditorGUILayout.EndHorizontal();
+                    }
+                    if (removeIndex > -1)
+                    {
+                        selectedVariables.RemoveAt(removeIndex);
+                    }
+                    // Добавить новое поле, если последнее выбрано
+                    if (selectedVariables.Count == 0 || (!string.IsNullOrEmpty(selectedVariables.Last()) && selectedVariables.Count < vars.Count))
+                    {
+                        if (GUILayout.Button("Добавить переменную"))
+                        {
+                            selectedVariables.Add("");
+                        }
+                    }
+                }
+
+                GUILayout.Label("Comment:");
+                comment = EditorGUILayout.TextArea(comment, GUILayout.Height(60));
+
+                GUILayout.Space(10);
+
+                if (GUILayout.Button("Add Step"))
+                {
+                    if (!string.IsNullOrEmpty(selectedScript) && selectedVariables.Any(v => !string.IsNullOrEmpty(v)))
+                    {
+                        var newStep = new TrackingStep
+                        {
+                            scriptName = selectedScript,
+                            variableNames = selectedVariables.Where(v => !string.IsNullOrEmpty(v)).ToList(),
+                            variableName = selectedVariables.FirstOrDefault(v => !string.IsNullOrEmpty(v)),
+                            comment = comment,
+                            isMonoBehaviourTracked = isCurrentScriptMono,
+                            hostScriptName = isCurrentScriptMono ? null : selectedHostScript,
+                            instanceFieldName = isCurrentScriptMono ? null : selectedInstanceField
+                        };
+                        OnStepCreated?.Invoke(newStep);
                         Close();
                     }
+                    else
+                    {
+                        EditorUtility.DisplayDialog("Error", "Please select a script and at least one variable.", "OK");
+                    }
+                }
+
+                if (GUILayout.Button("Cancel"))
+                {
+                    Close();
                 }
             }
+        }
+
+        public class EditPathWindow : EditorWindow
+        {
+            public TrackingPath PathToEdit;
+            public Action OnPathEdited;
+            private string pathName = "";
+            private string description = "";
+            private Vector2 scrollPos;
+
+            public void SetPath(TrackingPath path)
+            {
+                PathToEdit = path;
+                pathName = path != null ? path.pathName : "";
+                description = path != null ? path.description : "";
+                Repaint();
+            }
+
+            private void OnEnable()
+            {
+                if (PathToEdit != null)
+                {
+                    pathName = PathToEdit.pathName;
+                    description = PathToEdit.description;
+                }
+            }
+
+            private void OnGUI()
+            {
+                if (PathToEdit == null)
+                {
+                    GUILayout.Label("No path selected.", EditorStyles.boldLabel);
+                    return;
+                }
+                GUILayout.Label("Редактировать путь", EditorStyles.boldLabel);
+                pathName = EditorGUILayout.TextField("Название пути", pathName);
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Описание", GUILayout.Width(80));
+                scrollPos = EditorGUILayout.BeginScrollView(scrollPos, GUILayout.Height(60));
+                description = EditorGUILayout.TextArea(description, GUILayout.ExpandHeight(true));
+                EditorGUILayout.EndScrollView();
+                EditorGUILayout.EndHorizontal();
+                GUILayout.Space(10);
+                if (GUILayout.Button("Сохранить"))
+                {
+                    PathToEdit.pathName = pathName;
+                    PathToEdit.description = description;
+                    OnPathEdited?.Invoke();
+                    Close();
+                }
+                if (GUILayout.Button("Отмена"))
+                {
+                    Close();
+                }
+            }
+        }
+
+        [Serializable]
+        public class MultiVarTrackedInstance : TrackedInstance
+        {
+            public Dictionary<string, string> lastValues = new Dictionary<string, string>();
+            public Dictionary<string, double> highlightStartTimes = new Dictionary<string, double>();
+            public Dictionary<string, Label> valueLabels = new Dictionary<string, Label>();
+        }
+
+        public class ScriptPickerWindow : EditorWindow
+        {
+            public List<string> scriptsToShow;
+            public Action<string> onScriptSelected;
             
-            EditorGUILayout.EndScrollView();
+            private string searchQuery = "";
+            private Vector2 scrollPos;
+            private GUIStyle leftAlignedButtonStyle;
+
+            void OnEnable()
+            {
+                minSize = new Vector2(300, 400);
+                leftAlignedButtonStyle = new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft };
+            }
+
+            void OnGUI()
+            {
+                GUILayout.Label("Поиск скрипта:", EditorStyles.boldLabel);
+                searchQuery = EditorGUILayout.TextField(searchQuery);
+                
+                var filteredScripts = string.IsNullOrEmpty(searchQuery)
+                    ? scriptsToShow
+                    : scriptsToShow.Where(s => s.ToLowerInvariant().Contains(searchQuery.ToLowerInvariant())).ToList();
+
+                scrollPos = EditorGUILayout.BeginScrollView(scrollPos);
+                
+                if(filteredScripts != null)
+                {
+                    foreach (var scriptName in filteredScripts)
+                    {
+                        if (GUILayout.Button(scriptName, leftAlignedButtonStyle))
+                        {
+                            onScriptSelected?.Invoke(scriptName);
+                            Close();
+                        }
+                    }
+                }
+                
+                EditorGUILayout.EndScrollView();
+            }
+        }
+
+        public class StepCommentEditorWindow : EditorWindow
+        {
+            public Action<string> OnCommentSaved;
+            private string comment;
+
+            public static void Show(string initialComment, Action<string> onSave)
+            {
+                var window = CreateInstance<StepCommentEditorWindow>();
+                window.titleContent = new GUIContent("Редактировать комментарий шага");
+                window.comment = initialComment;
+                window.OnCommentSaved = onSave;
+                window.minSize = new Vector2(600, 260);
+                window.maxSize = new Vector2(600, 260);
+                window.ShowUtility();
+            }
+
+            public void CreateGUI()
+            {
+                var root = rootVisualElement;
+                root.Clear();
+                root.style.flexDirection = FlexDirection.Column;
+
+                var textField = new UnityEngine.UIElements.TextField("Комментарий шага") { value = comment, multiline = true };
+                textField.style.height = 140;
+                textField.style.marginBottom = 16;
+                textField.RegisterValueChangedCallback(evt => comment = evt.newValue);
+                root.Add(textField);
+
+                var buttonRow = new VisualElement();
+                buttonRow.style.flexDirection = FlexDirection.Row;
+                buttonRow.style.justifyContent = Justify.FlexEnd;
+                buttonRow.style.marginTop = 8;
+
+                var okButton = new Button(() => { OnCommentSaved?.Invoke(comment); Close(); }) { text = "OK" };
+                okButton.style.width = 180;
+                okButton.style.height = 54;
+                okButton.style.fontSize = 24;
+                okButton.style.backgroundColor = new Color(0.36f, 0.47f, 0.28f); // хаки-зелёный
+                okButton.style.unityFontStyleAndWeight = FontStyle.Bold;
+                okButton.style.marginRight = 16;
+
+                var cancelButton = new Button(Close) { text = "Отмена" };
+                cancelButton.style.width = 180;
+                cancelButton.style.height = 54;
+                cancelButton.style.fontSize = 24;
+                cancelButton.style.unityFontStyleAndWeight = FontStyle.Bold;
+
+                buttonRow.Add(okButton);
+                buttonRow.Add(cancelButton);
+                root.Add(buttonRow);
+            }
         }
     }
 } 
