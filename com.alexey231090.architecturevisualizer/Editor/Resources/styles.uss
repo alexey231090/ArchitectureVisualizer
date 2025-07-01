@@ -1,0 +1,48 @@
+.drag-hover {
+    border-color: rgb(61, 133, 224);
+    border-width: 2px;
+    border-radius: 5px;
+    background-color: rgba(61, 133, 224, 0.1);
+}
+
+.et-step-column {
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: rgb(89, 89, 89);
+    padding: 5px;
+    margin: 2px;
+    background-color: rgb(60, 60, 60);
+    transition: all 0.15s ease-in-out;
+}
+
+.et-step-column:hover {
+    border-color: rgb(100, 100, 100);
+    background-color: rgb(70, 70, 70);
+}
+
+.search-field {
+    margin: 5px;
+    padding: 5px;
+    flex-grow: 1;
+}
+
+.et-path-title--active {
+    color: #e53935;
+    font-weight: bold;
+}
+
+Foldout.et-path-title--active .unity-foldout__text {
+    color: #e53935;
+    font-weight: bold;
+}
+
+.et-path-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 5px;
+    background-color: #e53935;
+    margin-right: 6px;
+    margin-top: 2px;
+    margin-bottom: 2px;
+    align-self: center;
+}

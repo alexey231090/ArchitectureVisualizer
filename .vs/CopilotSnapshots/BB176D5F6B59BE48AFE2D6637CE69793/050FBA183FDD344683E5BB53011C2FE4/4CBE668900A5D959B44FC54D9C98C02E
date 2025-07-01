@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEditor;
 using UnityEditor.Experimental.GraphView;
 using UnityEngine.UIElements;
@@ -564,173 +564,158 @@ namespace ArchitectureVisualizer
             // Отрисовка каждого пути как сворачиваемого блока (основные)
             foreach (var path in EventTrackingManager.TrackingPaths)
             {
-                // Контейнер для всего пути
-                var pathRoot = new VisualElement();
-                pathRoot.AddToClassList("et-path-container");
-                eventTrackingContainer.Add(pathRoot);
+                var pathContainer = new Foldout();
+                pathContainer.text = path.pathName;
+                pathContainer.value = path.isExpanded;
+                pathContainer.RegisterValueChangedCallback(evt => path.isExpanded = evt.newValue);
+                pathContainer.AddToClassList("et-path-container");
+                eventTrackingContainer.Add(pathContainer);
 
-                // --- Заголовок пути ---
-                var headerRow = new VisualElement();
-                headerRow.style.flexDirection = FlexDirection.Row;
-                headerRow.style.alignItems = Align.Center;
-                headerRow.style.marginBottom = 2;
-                pathRoot.Add(headerRow);
+                // --- Содержимое Foldout для каждого пути ---
 
-                // Кнопка-стрелка
-                var expandButton = new Button(() => {
-                    path.isExpanded = !path.isExpanded;
-                    UpdateEventTracking();
-                });
-                expandButton.text = path.isExpanded ? "▼" : "►";
-                expandButton.style.width = 22;
-                expandButton.style.height = 18;
-                expandButton.style.marginRight = 4;
-                expandButton.style.unityFontStyleAndWeight = FontStyle.Bold;
-                headerRow.Add(expandButton);
+                var pathControls = new VisualElement();
+                pathControls.AddToClassList("et-path-controls");
+                
+                var trackButton = new Button(() => ToggleTracking(path)) { text = path.isTracking ? "Stop" : "Track" };
+                trackButton.AddToClassList("et-button");
+                trackButton.AddToClassList(path.isTracking ? "et-button--stop" : "et-button--track");
+                pathControls.Add(trackButton);
 
-                // Красная точка если активен
-                if (path.isTracking)
+                var editButton = new Button(() => ShowEditPathDialog(path)) { text = "✎" };
+                editButton.AddToClassList("et-button");
+                editButton.tooltip = "Редактировать путь";
+                pathControls.Add(editButton);
+
+                var deleteButton = new Button(() => DeletePath(path)) { text = "Delete" };
+                deleteButton.AddToClassList("et-button");
+                deleteButton.AddToClassList("et-button--danger");
+                pathControls.Add(deleteButton);
+                
+                pathContainer.Add(pathControls);
+
+                if (!string.IsNullOrEmpty(path.description))
                 {
-                    var indicator = new VisualElement();
-                    indicator.AddToClassList("et-path-indicator");
-                    headerRow.Add(indicator);
+                    var descriptionLabel = new Label(path.description);
+                    descriptionLabel.AddToClassList("et-step-comment");
+                    pathContainer.Add(descriptionLabel);
                 }
+                
+                var addStepButton = new Button(() => ShowAddStepDialog(path)) { text = "Add Step" };
+                addStepButton.AddToClassList("et-button");
+                pathContainer.Add(addStepButton);
 
-                // Название пути
-                var nameLabel = new Label(path.pathName);
-                nameLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-                nameLabel.style.fontSize = 13;
-                nameLabel.style.marginRight = 6;
-                if (path.isTracking)
-                    nameLabel.style.color = new Color(0.9f, 0.2f, 0.2f);
-                headerRow.Add(nameLabel);
+                // Горизонтальный ScrollView для шагов
+                var stepsScrollView = new ScrollView(ScrollViewMode.Horizontal);
+                stepsScrollView.AddToClassList("et-steps-scrollview");
+                pathContainer.Add(stepsScrollView);
 
-                // --- Содержимое пути ---
-                if (path.isExpanded)
+                // Контейнер для строки шагов
+                var stepsRow = new VisualElement();
+                stepsRow.AddToClassList("et-steps-row");
+                stepsScrollView.Add(stepsRow);
+
+                // Отрисовка каждого шага как колонки в горизонтальном ряду
+                foreach (var step in path.steps)
                 {
-                    // Всё содержимое, что раньше было внутри Foldout, теперь добавляем сюда:
-                    var pathControls = new VisualElement();
-                    pathControls.AddToClassList("et-path-controls");
-                    var trackButton = new Button(() => ToggleTracking(path)) { text = path.isTracking ? "Stop" : "Track" };
-                    trackButton.AddToClassList("et-button");
-                    trackButton.AddToClassList(path.isTracking ? "et-button--stop" : "et-button--track");
-                    pathControls.Add(trackButton);
-                    var editButton = new Button(() => ShowEditPathDialog(path)) { text = "✎" };
-                    editButton.AddToClassList("et-button");
-                    editButton.tooltip = "Редактировать путь";
-                    pathControls.Add(editButton);
-                    var deleteButton = new Button(() => DeletePath(path)) { text = "Delete" };
-                    deleteButton.AddToClassList("et-button");
-                    deleteButton.AddToClassList("et-button--danger");
-                    pathControls.Add(deleteButton);
-                    pathRoot.Add(pathControls);
-                    if (!string.IsNullOrEmpty(path.description))
+                    var stepColumn = new VisualElement();
+                    stepColumn.AddToClassList("et-step-column");
+
+                    var stepRow = new VisualElement();
+                    stepRow.style.flexDirection = FlexDirection.Row;
+                    stepRow.style.alignItems = Align.Center;
+                    stepRow.style.justifyContent = Justify.SpaceBetween;
+
+                    // Получаем переменные для шага без дублирования
+                    List<string> variables = (step.variableNames != null && step.variableNames.Count > 0)
+                        ? step.variableNames
+                        : (!string.IsNullOrEmpty(step.variableName) ? new List<string> { step.variableName } : new List<string>());
+                    var stepLabelText = $"{step.scriptName} ({string.Join(", ", variables)})";
+                    var stepLabel = new Label(stepLabelText);
+                    stepLabel.AddToClassList("et-step-label");
+                    stepRow.Add(stepLabel);
+
+                    var deleteStepButton = new Button(() => DeleteStep(path, step));
+                    deleteStepButton.AddToClassList("et-button");
+                    deleteStepButton.AddToClassList("et-button--danger");
+                    deleteStepButton.style.width = 24;
+                    deleteStepButton.style.height = 24;
+                    deleteStepButton.style.minWidth = 24;
+                    deleteStepButton.style.minHeight = 24;
+                    deleteStepButton.style.maxWidth = 24;
+                    deleteStepButton.style.maxHeight = 24;
+                    deleteStepButton.text = "✖";
+                    deleteStepButton.style.unityFontStyleAndWeight = FontStyle.Bold;
+                    deleteStepButton.style.fontSize = 16;
+                    stepRow.Add(deleteStepButton);
+
+                    stepColumn.Add(stepRow);
+                    
+                    if (!string.IsNullOrEmpty(step.comment))
                     {
-                        var descriptionLabel = new Label(path.description);
-                        descriptionLabel.AddToClassList("et-step-comment");
-                        pathRoot.Add(descriptionLabel);
+                        var commentRow = new VisualElement();
+                        commentRow.style.flexDirection = FlexDirection.Row;
+                        var commentLabel = new Label(step.comment);
+                        commentLabel.AddToClassList("et-step-comment");
+                        commentRow.Add(commentLabel);
+                        var editCommentButton = new Button(() => {
+                            ShowInlineStepCommentEditor(step, path);
+                        }) { text = "✎" };
+                        editCommentButton.AddToClassList("et-button");
+                        editCommentButton.tooltip = "Редактировать комментарий шага";
+                        commentRow.Add(editCommentButton);
+                        stepColumn.Add(commentRow);
                     }
-                    var addStepButton = new Button(() => ShowAddStepDialog(path)) { text = "Add Step" };
-                    addStepButton.AddToClassList("et-button");
-                    pathRoot.Add(addStepButton);
-                    var stepsScrollView = new ScrollView(ScrollViewMode.Horizontal);
-                    stepsScrollView.AddToClassList("et-steps-scrollview");
-                    pathRoot.Add(stepsScrollView);
-                    var stepsRow = new VisualElement();
-                    stepsRow.AddToClassList("et-steps-row");
-                    stepsScrollView.Add(stepsRow);
-                    foreach (var step in path.steps)
+                    else
                     {
-                        var stepColumn = new VisualElement();
-                        stepColumn.AddToClassList("et-step-column");
-                        var stepRow = new VisualElement();
-                        stepRow.style.flexDirection = FlexDirection.Row;
-                        stepRow.style.alignItems = Align.Center;
-                        stepRow.style.justifyContent = Justify.SpaceBetween;
-                        List<string> variables = (step.variableNames != null && step.variableNames.Count > 0)
-                            ? step.variableNames
-                            : (!string.IsNullOrEmpty(step.variableName) ? new List<string> { step.variableName } : new List<string>());
-                        var stepLabelText = $"{step.scriptName} ({string.Join(", ", variables)})";
-                        var stepLabel = new Label(stepLabelText);
-                        stepLabel.AddToClassList("et-step-label");
-                        stepRow.Add(stepLabel);
-                        var deleteStepButton = new Button(() => DeleteStep(path, step));
-                        deleteStepButton.AddToClassList("et-button");
-                        deleteStepButton.AddToClassList("et-button--danger");
-                        deleteStepButton.style.width = 24;
-                        deleteStepButton.style.height = 24;
-                        deleteStepButton.style.minWidth = 24;
-                        deleteStepButton.style.minHeight = 24;
-                        deleteStepButton.style.maxWidth = 24;
-                        deleteStepButton.style.maxHeight = 24;
-                        deleteStepButton.text = "✖";
-                        deleteStepButton.style.unityFontStyleAndWeight = FontStyle.Bold;
-                        deleteStepButton.style.fontSize = 16;
-                        stepRow.Add(deleteStepButton);
-                        stepColumn.Add(stepRow);
-                        if (!string.IsNullOrEmpty(step.comment))
+                        var addCommentButton = new Button(() => {
+                            ShowInlineStepCommentEditor(step, path);
+                        }) { text = "✎" };
+                        addCommentButton.AddToClassList("et-button");
+                        addCommentButton.tooltip = "Добавить комментарий";
+                        stepColumn.Add(addCommentButton);
+                    }
+                    
+                    var valuesContainer = new VisualElement { name = "values-container" };
+                    valuesContainer.AddToClassList("et-values-container");
+                    stepColumn.Add(valuesContainer);
+
+                    if (path.isTracking)
+                    {
+                        foreach (var instance in step.trackedInstances)
                         {
-                            var commentRow = new VisualElement();
-                            commentRow.style.flexDirection = FlexDirection.Row;
-                            var commentLabel = new Label(step.comment);
-                            commentLabel.AddToClassList("et-step-comment");
-                            commentRow.Add(commentLabel);
-                            var editCommentButton = new Button(() => {
-                                ShowInlineStepCommentEditor(step, path);
-                            }) { text = "✎" };
-                            editCommentButton.AddToClassList("et-button");
-                            editCommentButton.tooltip = "Редактировать комментарий шага";
-                            commentRow.Add(editCommentButton);
-                            stepColumn.Add(commentRow);
-                        }
-                        else
-                        {
-                            var addCommentButton = new Button(() => {
-                                ShowInlineStepCommentEditor(step, path);
-                            }) { text = "✎" };
-                            addCommentButton.AddToClassList("et-button");
-                            addCommentButton.tooltip = "Добавить комментарий";
-                            stepColumn.Add(addCommentButton);
-                        }
-                        var valuesContainer = new VisualElement { name = "values-container" };
-                        valuesContainer.AddToClassList("et-values-container");
-                        stepColumn.Add(valuesContainer);
-                        if (path.isTracking)
-                        {
-                            foreach (var instance in step.trackedInstances)
+                            if (instance is MultiVarTrackedInstance multiInst)
                             {
-                                if (instance is MultiVarTrackedInstance multiInst)
+                                string gameObjectName = multiInst.component != null ? multiInst.component.gameObject.name : "[Instance]";
+                                var instanceContainer = new VisualElement();
+                                instanceContainer.AddToClassList("et-instance-container");
+                                valuesContainer.Add(instanceContainer);
+
+                                foreach (var varName in variables)
                                 {
-                                    string gameObjectName = multiInst.component != null ? multiInst.component.gameObject.name : "[Instance]";
-                                    var instanceContainer = new VisualElement();
-                                    instanceContainer.AddToClassList("et-instance-container");
-                                    valuesContainer.Add(instanceContainer);
-                                    foreach (var varName in variables)
+                                    string val = multiInst.lastValues.TryGetValue(varName, out var value) ? value : "[No value]";
+                                    Label valueLabel;
+                                    string typeStr = val != "[No value]" && val != null ? val.GetType().Name : "null";
+                                    if (variables.Count == 1)
                                     {
-                                        string val = multiInst.lastValues.TryGetValue(varName, out var value) ? value : "[No value]";
-                                        Label valueLabel;
-                                        string typeStr = val != "[No value]" && val != null ? val.GetType().Name : "null";
-                                        if (variables.Count == 1)
-                                        {
-                                            valueLabel = new Label($"{gameObjectName} [{varName} ({typeStr})]: {val}");
-                                        }
-                                        else
-                                        {
-                                            valueLabel = new Label($"{gameObjectName} [{varName} ({typeStr})]: {val}");
-                                        }
-                                        valueLabel.AddToClassList("et-value-label");
-                                        if (multiInst.valueLabels == null)
-                                        {
-                                            multiInst.valueLabels = new Dictionary<string, Label>();
-                                        }
-                                        multiInst.valueLabels[varName] = valueLabel;
-                                        instanceContainer.Add(valueLabel);
+                                        valueLabel = new Label($"{gameObjectName} [{varName} ({typeStr})]: {val}"); // Только переменная и значение
                                     }
+                                    else
+                                    {
+                                        valueLabel = new Label($"{gameObjectName} [{varName} ({typeStr})]: {val}"); // Имя переменной и значение
+                                    }
+                                    valueLabel.AddToClassList("et-value-label");
+                                    if (multiInst.valueLabels == null)
+                                    {
+                                        multiInst.valueLabels = new Dictionary<string, Label>();
+                                    }
+                                    multiInst.valueLabels[varName] = valueLabel;
+                                    instanceContainer.Add(valueLabel);
                                 }
                             }
                         }
-                        stepsRow.Add(stepColumn);
                     }
+
+                    stepsRow.Add(stepColumn);
                 }
             }
 
@@ -805,22 +790,6 @@ namespace ArchitectureVisualizer
             path.isTracking = !path.isTracking;
             EventTrackingManager.UpdatePath();
 
-            // --- Костыль: перекрашиваем заголовок Foldout напрямую ---
-            foreach (var foldout in eventTrackingContainer.Children().OfType<Foldout>())
-            {
-                if (foldout.text == path.pathName)
-                {
-                    var label = foldout.Q<Label>("unity-foldout__text");
-                    if (label != null)
-                    {
-                        if (path.isTracking)
-                            label.style.color = new Color(0.9f, 0.2f, 0.2f);
-                        else
-                            label.style.color = StyleKeyword.Null;
-                    }
-                }
-            }
-
             if (path.isTracking)
             {
                 UpdateTrackedValuesData();
@@ -862,6 +831,17 @@ namespace ArchitectureVisualizer
             window.minSize = new Vector2(500, 750);
             window.OnStepCreated = (newStep) => {
                 EventTrackingManager.AddStep(path, newStep);
+                UpdateEventTracking();
+            };
+        }
+
+        private void ShowEditStepDialog(TrackingStep step, TrackingPath path)
+        {
+            var window = GetWindow<EditStepWindow>("Edit Step");
+            window.SetStep(step);
+            window.OnStepEdited = () =>
+            {
+                EventTrackingManager.UpdatePath();
                 UpdateEventTracking();
             };
         }
@@ -912,7 +892,6 @@ namespace ArchitectureVisualizer
             });
         }
 
-        // Вспомогательный класс AddPathWindow
         public class AddPathWindow : EditorWindow
         {
             public Action<TrackingPath> OnPathCreated;
@@ -1447,6 +1426,8 @@ namespace ArchitectureVisualizer
             }
         }
 
+        public class StepComment// ...existing code...
+
         public class StepCommentEditorWindow : EditorWindow
         {
             public Action<string> OnCommentSaved;
@@ -1499,5 +1480,5 @@ namespace ArchitectureVisualizer
                 root.Add(buttonRow);
             }
         }
-    }
-} 
+    } // Закрывающая скобка для класса ArchitectureVisualizerWindow
+} // Закрывающая скобка для namespace ArchitectureVisualizer

@@ -163,6 +163,18 @@ namespace ArchitectureVisualizer
                     if (loadedData != null)
                     {
                         TrackingPaths = loadedData.ToList();
+                        foreach (var path in TrackingPaths)
+                        {
+                            if (path.steps == null)
+                                path.steps = new List<TrackingStep>();
+                            foreach (var step in path.steps)
+                            {
+                                if (step.variableNames == null)
+                                    step.variableNames = new List<string>();
+                                if (step.trackedInstances == null)
+                                    step.trackedInstances = new List<TrackedInstance>();
+                            }
+                        }
                         Debug.Log($"[ArchitectureVisualizer] Основной json загружен, путей: {TrackingPaths.Count}");
                     }
                     else
@@ -192,6 +204,18 @@ namespace ArchitectureVisualizer
                     if (loadedAiData != null)
                     {
                         AiTrackingPaths = loadedAiData.ToList();
+                        foreach (var path in AiTrackingPaths)
+                        {
+                            if (path.steps == null)
+                                path.steps = new List<TrackingStep>();
+                            foreach (var step in path.steps)
+                            {
+                                if (step.variableNames == null)
+                                    step.variableNames = new List<string>();
+                                if (step.trackedInstances == null)
+                                    step.trackedInstances = new List<TrackedInstance>();
+                            }
+                        }
                         Debug.Log($"[ArchitectureVisualizer] AI json загружен, путей: {AiTrackingPaths.Count}");
                     }
                     else
