@@ -1503,33 +1503,41 @@ namespace ArchitectureVisualizer
                         {
                             step.variableNames[i] = availableVariables[newVarIdx];
                         }
-                        if (GUILayout.Button("Удалить", GUILayout.Width(60)))
+                        Color prevColor = GUI.backgroundColor;
+                        GUI.backgroundColor = new Color(0.95f, 0.55f, 0.51f); // светло-красный
+                        if (GUILayout.Button("Удалить", GUILayout.Width(80), GUILayout.Height(28)))
                         {
                             removeIndex = i;
                         }
+                        GUI.backgroundColor = prevColor;
                         EditorGUILayout.EndHorizontal();
                     }
                     if (removeIndex > -1 && step.variableNames.Count > 0)
                     {
                         step.variableNames.RemoveAt(removeIndex);
                     }
-                    if (GUILayout.Button("Добавить переменную") && availableVariables.Count > 0)
+                    Color prevAdd = GUI.backgroundColor;
+                    GUI.backgroundColor = new Color(1.0f, 0.95f, 0.47f); // светло-жёлтый
+                    if (GUILayout.Button("Добавить переменную", GUILayout.Width(160), GUILayout.Height(32)) && availableVariables.Count > 0)
                     {
                         step.variableNames.Add(availableVariables[0]);
                     }
+                    GUI.backgroundColor = prevAdd;
                 }
                 GUILayout.Space(10);
                 GUILayout.Label("Комментарий:", EditorStyles.boldLabel);
                 comment = EditorGUILayout.TextArea(comment, GUILayout.Height(60));
                 GUILayout.Space(10);
-                if (GUILayout.Button("Сохранить"))
+                Color prevSave = GUI.backgroundColor;
+                GUI.backgroundColor = new Color(0.51f, 0.78f, 0.52f); // светло-зелёный
+                if (GUILayout.Button("Сохранить", GUILayout.Width(160), GUILayout.Height(36)))
                 {
                     step.comment = comment;
-                    // Для совместимости с кодом, где используется variableName
                     step.variableName = step.variableNames.FirstOrDefault() ?? "";
                     onStepEdited?.Invoke();
                     Close();
                 }
+                GUI.backgroundColor = prevSave;
             }
         }
     }

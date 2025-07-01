@@ -46,3 +46,18 @@ Foldout.et-path-title--active .unity-foldout__text {
     margin-bottom: 2px;
     align-self: center;
 }
+
+.et-btn-delete {
+    background-color: #b94a48;
+    color: #fff;
+}
+
+.et-btn-add {
+    background-color: #ffe082;
+    color: #5d4037;
+}
+
+.et-btn-save {
+    background-color: #81c784;
+    color: #1b5e20;
+}
