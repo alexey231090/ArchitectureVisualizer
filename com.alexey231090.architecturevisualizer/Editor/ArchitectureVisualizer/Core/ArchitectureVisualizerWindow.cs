@@ -905,8 +905,7 @@ namespace ArchitectureVisualizer
 
         private void ShowInlineStepCommentEditor(TrackingStep step, TrackingPath path)
         {
-            StepCommentEditorWindow.Show(step.comment, newComment => {
-                step.comment = newComment;
+            EditStepWindow.Show(step, path, () => {
                 EventTrackingManager.UpdatePath();
                 UpdateEventTracking();
             });
@@ -1447,56 +1446,90 @@ namespace ArchitectureVisualizer
             }
         }
 
-        public class StepCommentEditorWindow : EditorWindow
+        public class EditStepWindow : EditorWindow
         {
-            public Action<string> OnCommentSaved;
+            private TrackingStep step;
+            private TrackingPath path;
+            private Action onStepEdited;
+            private List<string> availableVariables = new List<string>();
             private string comment;
+            private Vector2 scrollPos;
 
-            public static void Show(string initialComment, Action<string> onSave)
+            public static void Show(TrackingStep step, TrackingPath path, Action onStepEdited)
             {
-                var window = CreateInstance<StepCommentEditorWindow>();
-                window.titleContent = new GUIContent("Редактировать комментарий шага");
-                window.comment = initialComment;
-                window.OnCommentSaved = onSave;
-                window.minSize = new Vector2(600, 260);
-                window.maxSize = new Vector2(600, 260);
-                window.ShowUtility();
+                var window = GetWindow<EditStepWindow>("Edit Step");
+                window.step = step;
+                window.path = path;
+                window.onStepEdited = onStepEdited;
+                window.comment = step.comment;
+                window.FindAvailableVariables();
+                window.minSize = new Vector2(400, 350);
+                window.Show();
             }
 
-            public void CreateGUI()
+            private void FindAvailableVariables()
             {
-                var root = rootVisualElement;
-                root.Clear();
-                root.style.flexDirection = FlexDirection.Column;
+                availableVariables.Clear();
+                if (!string.IsNullOrEmpty(step.scriptName))
+                {
+                    var type = ((ArchitectureVisualizerWindow)EditorWindow.GetWindow(typeof(ArchitectureVisualizerWindow))).FindType(step.scriptName);
+                    if (type != null)
+                    {
+                        availableVariables = ArchitectureVisualizerWindow.GetFieldAndPropertyNames(type);
+                    }
+                }
+            }
 
-                var textField = new UnityEngine.UIElements.TextField("Комментарий шага") { value = comment, multiline = true };
-                textField.style.height = 140;
-                textField.style.marginBottom = 16;
-                textField.RegisterValueChangedCallback(evt => comment = evt.newValue);
-                root.Add(textField);
-
-                var buttonRow = new VisualElement();
-                buttonRow.style.flexDirection = FlexDirection.Row;
-                buttonRow.style.justifyContent = Justify.FlexEnd;
-                buttonRow.style.marginTop = 8;
-
-                var okButton = new Button(() => { OnCommentSaved?.Invoke(comment); Close(); }) { text = "OK" };
-                okButton.style.width = 180;
-                okButton.style.height = 54;
-                okButton.style.fontSize = 24;
-                okButton.style.backgroundColor = new Color(0.36f, 0.47f, 0.28f); // хаки-зелёный
-                okButton.style.unityFontStyleAndWeight = FontStyle.Bold;
-                okButton.style.marginRight = 16;
-
-                var cancelButton = new Button(Close) { text = "Отмена" };
-                cancelButton.style.width = 180;
-                cancelButton.style.height = 54;
-                cancelButton.style.fontSize = 24;
-                cancelButton.style.unityFontStyleAndWeight = FontStyle.Bold;
-
-                buttonRow.Add(okButton);
-                buttonRow.Add(cancelButton);
-                root.Add(buttonRow);
+            private void OnGUI()
+            {
+                GUILayout.Label("Редактировать шаг", EditorStyles.boldLabel);
+                GUILayout.Label($"Скрипт: {step.scriptName}", EditorStyles.wordWrappedLabel);
+                GUILayout.Space(5);
+                GUILayout.Label("Переменные:", EditorStyles.boldLabel);
+                int removeIndex = -1;
+                if (availableVariables.Count == 0)
+                {
+                    GUILayout.Label("Нет доступных переменных для этого скрипта.", EditorStyles.wordWrappedLabel);
+                }
+                else
+                {
+                    for (int i = 0; i < step.variableNames.Count; i++)
+                    {
+                        EditorGUILayout.BeginHorizontal();
+                        int varIdx = availableVariables.IndexOf(step.variableNames[i]);
+                        if (varIdx < 0) varIdx = 0;
+                        int newVarIdx = EditorGUILayout.Popup(varIdx, availableVariables.ToArray());
+                        if (newVarIdx != varIdx)
+                        {
+                            step.variableNames[i] = availableVariables[newVarIdx];
+                        }
+                        if (GUILayout.Button("Удалить", GUILayout.Width(60)))
+                        {
+                            removeIndex = i;
+                        }
+                        EditorGUILayout.EndHorizontal();
+                    }
+                    if (removeIndex > -1 && step.variableNames.Count > 0)
+                    {
+                        step.variableNames.RemoveAt(removeIndex);
+                    }
+                    if (GUILayout.Button("Добавить переменную") && availableVariables.Count > 0)
+                    {
+                        step.variableNames.Add(availableVariables[0]);
+                    }
+                }
+                GUILayout.Space(10);
+                GUILayout.Label("Комментарий:", EditorStyles.boldLabel);
+                comment = EditorGUILayout.TextArea(comment, GUILayout.Height(60));
+                GUILayout.Space(10);
+                if (GUILayout.Button("Сохранить"))
+                {
+                    step.comment = comment;
+                    // Для совместимости с кодом, где используется variableName
+                    step.variableName = step.variableNames.FirstOrDefault() ?? "";
+                    onStepEdited?.Invoke();
+                    Close();
+                }
             }
         }
     }
