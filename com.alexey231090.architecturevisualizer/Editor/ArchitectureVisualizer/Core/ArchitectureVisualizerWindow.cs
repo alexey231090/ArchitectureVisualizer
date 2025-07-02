@@ -44,8 +44,22 @@ namespace ArchitectureVisualizer
         private Dictionary<int, Label> _instanceLabels = new Dictionary<int, Label>();
         private string selectedScriptName;
 
+        // --- Debug Logs: структура для хранения логов по скриптам ---
+        private class DebugLogEntry
+        {
+            public int lineNumber;
+            public string lineText;
+            public bool isActive;
+        }
+        private Dictionary<string, List<DebugLogEntry>> debugLogsByScript = new Dictionary<string, List<DebugLogEntry>>();
+
         // --- Debug Logs: динамический список выбранных скриптов ---
         private List<string> selectedDebugScripts = new List<string>();
+        private VisualElement selectedScriptsContainer;
+        private PopupField<string> scriptDropdown;
+        private List<string> scriptFiles = new List<string>();
+
+        private Font debugLogFont;
 
         private void OnEnable()
         {
@@ -166,17 +180,17 @@ namespace ArchitectureVisualizer
             debugLogsPanel.Add(debugLogsPathLabel);
 
             // Список скриптов из выбранной папки
-            var scriptFiles = Directory.GetFiles(selectedFolder, "*.cs", SearchOption.AllDirectories)
+            scriptFiles = Directory.GetFiles(selectedFolder, "*.cs", SearchOption.AllDirectories)
                 .Select(Path.GetFileName)
                 .ToList();
             var selectedDebugScript = scriptFiles.Count > 0 ? scriptFiles[0] : null;
-            var scriptDropdown = new PopupField<string>("Script", scriptFiles, 0);
+            scriptDropdown = new PopupField<string>("Script", scriptFiles, 0);
             scriptDropdown.label = "Script";
             scriptDropdown.style.marginBottom = 8;
             debugLogsPanel.Add(scriptDropdown);
 
             // Контейнер для выбранных скриптов и их логов
-            var selectedScriptsContainer = new VisualElement();
+            selectedScriptsContainer = new VisualElement();
             selectedScriptsContainer.style.flexDirection = FlexDirection.Column;
             selectedScriptsContainer.style.marginTop = 8;
             debugLogsPanel.Add(selectedScriptsContainer);
@@ -187,43 +201,39 @@ namespace ArchitectureVisualizer
                 if (!string.IsNullOrEmpty(scriptToAdd) && !selectedDebugScripts.Contains(scriptToAdd))
                 {
                     selectedDebugScripts.Add(scriptToAdd);
+                    // Анализируем только этот скрипт
+                    var scriptPath = Directory.GetFiles(selectedFolder, scriptToAdd, SearchOption.AllDirectories).FirstOrDefault();
+                    if (!string.IsNullOrEmpty(scriptPath) && File.Exists(scriptPath))
+                    {
+                        var lines = File.ReadAllLines(scriptPath);
+                        var logs = new List<DebugLogEntry>();
+                        for (int i = 0; i < lines.Length; i++)
+                        {
+                            var line = lines[i];
+                            var trimmed = line.TrimStart();
+                            bool isCommented = trimmed.StartsWith("//");
+                            string checkLine = isCommented ? trimmed.Substring(2).TrimStart() : trimmed;
+                            if (checkLine.StartsWith("Debug.Log(") || checkLine.StartsWith("Debug.LogWarning(") || checkLine.StartsWith("Debug.LogError("))
+                            {
+                                logs.Add(new DebugLogEntry
+                                {
+                                    lineNumber = i + 1,
+                                    lineText = line.Trim(),
+                                    isActive = !isCommented
+                                });
+                            }
+                        }
+                        debugLogsByScript[scriptToAdd] = logs;
+                    }
+                    else
+                    {
+                        debugLogsByScript[scriptToAdd] = new List<DebugLogEntry>();
+                    }
                     RefreshSelectedScriptsUI();
                 }
             }) { text = "Добавить" };
             addScriptButton.style.marginBottom = 8;
             debugLogsPanel.Add(addScriptButton);
-
-            // Метод для обновления UI выбранных скриптов
-            void RefreshSelectedScriptsUI()
-            {
-                selectedScriptsContainer.Clear();
-                foreach (var script in selectedDebugScripts)
-                {
-                    var scriptBlock = new VisualElement();
-                    scriptBlock.style.marginBottom = 10;
-                    scriptBlock.style.borderBottomWidth = 1;
-                    scriptBlock.style.borderBottomColor = new Color(0.7f, 0.7f, 0.7f);
-                    scriptBlock.style.paddingBottom = 4;
-
-                    var scriptHeader = new VisualElement { style = { flexDirection = FlexDirection.Row } };
-                    scriptHeader.Add(new Label(script) { style = { unityFontStyleAndWeight = FontStyle.Bold, marginRight = 8 } });
-                    var removeBtn = new Button(() => {
-                        selectedDebugScripts.Remove(script);
-                        RefreshSelectedScriptsUI();
-                    }) { text = "Удалить" };
-                    scriptHeader.Add(removeBtn);
-                    scriptBlock.Add(scriptHeader);
-
-                    // Заглушка для логов
-                    var logsList = new VisualElement();
-                    logsList.style.marginLeft = 16;
-                    logsList.Add(new Label("[☑] Debug.Log(\"Alex\");    Line 42"));
-                    logsList.Add(new Label("[ ] Debug.LogError(\"Error\"); Line 99"));
-                    scriptBlock.Add(logsList);
-
-                    selectedScriptsContainer.Add(scriptBlock);
-                }
-            }
 
             // Первичная инициализация UI выбранных скриптов
             RefreshSelectedScriptsUI();
@@ -237,12 +247,97 @@ namespace ArchitectureVisualizer
             {
                 Debug.Log($"Tab: {tab}");
             }
+
+            // Загружаем шрифт для кириллицы
+            debugLogFont = AssetDatabase.LoadAssetAtPath<Font>("Assets/Editor/Resources/Fonts/Roboto-Regular.ttf");
+        }
+
+        private void RefreshSelectedScriptsUI()
+        {
+            if (selectedScriptsContainer == null) return;
+            selectedScriptsContainer.Clear();
+            foreach (var script in selectedDebugScripts)
+            {
+                var scriptBlock = new VisualElement();
+                scriptBlock.style.marginBottom = 10;
+                scriptBlock.style.borderBottomWidth = 1;
+                scriptBlock.style.borderBottomColor = new Color(0.7f, 0.7f, 0.7f);
+                scriptBlock.style.paddingBottom = 4;
+
+                var scriptHeader = new VisualElement { style = { flexDirection = FlexDirection.Row } };
+                var scriptLabel = new Label(script) { style = { unityFontStyleAndWeight = FontStyle.Bold, marginRight = 8 } };
+                if (debugLogFont != null) scriptLabel.style.unityFont = debugLogFont;
+                scriptHeader.Add(scriptLabel);
+                var removeBtn = new Button(() => {
+                    selectedDebugScripts.Remove(script);
+                    RefreshSelectedScriptsUI();
+                }) { text = "Удалить" };
+                scriptHeader.Add(removeBtn);
+                scriptBlock.Add(scriptHeader);
+
+                // Реальные логи после анализа
+                var logsList = new VisualElement();
+                logsList.style.marginLeft = 16;
+                if (debugLogsByScript.TryGetValue(script, out var logs) && logs.Count > 0)
+                {
+                    foreach (var log in logs)
+                    {
+                        var logRow = new VisualElement { style = { flexDirection = FlexDirection.Row, marginBottom = 2 } };
+                        var check = new Toggle { value = log.isActive };
+                        check.SetEnabled(false); // Пока только просмотр, без изменения
+                        logRow.Add(check);
+                        var logLabel = new Label($"{log.lineText}    Line {log.lineNumber}");
+                        if (debugLogFont != null) logLabel.style.unityFont = debugLogFont;
+                        logRow.Add(logLabel);
+                        logsList.Add(logRow);
+                    }
+                }
+                else
+                {
+                    var noLogLabel = new Label("Нет Debug.Log в этом скрипте.");
+                    if (debugLogFont != null) noLogLabel.style.unityFont = debugLogFont;
+                    logsList.Add(noLogLabel);
+                }
+                scriptBlock.Add(logsList);
+
+                selectedScriptsContainer.Add(scriptBlock);
+            }
         }
 
         private void AnalyzeProject()
         {
             // Подгружаем оба json-файла заново
             EventTrackingManager.LoadPaths();
+
+            // --- Анализ Debug.Log для выбранных скриптов ---
+            debugLogsByScript.Clear();
+            foreach (var script in selectedDebugScripts)
+            {
+                var scriptPath = Directory.GetFiles(selectedFolder, script, SearchOption.AllDirectories).FirstOrDefault();
+                if (string.IsNullOrEmpty(scriptPath) || !File.Exists(scriptPath))
+                    continue;
+                var lines = File.ReadAllLines(scriptPath);
+                var logs = new List<DebugLogEntry>();
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    var line = lines[i];
+                    // Поиск Debug.Log, Debug.LogWarning, Debug.LogError (и закомментированных)
+                    var trimmed = line.TrimStart();
+                    bool isCommented = trimmed.StartsWith("//");
+                    string checkLine = isCommented ? trimmed.Substring(2).TrimStart() : trimmed;
+                    if (checkLine.StartsWith("Debug.Log(") || checkLine.StartsWith("Debug.LogWarning(") || checkLine.StartsWith("Debug.LogError("))
+                    {
+                        logs.Add(new DebugLogEntry
+                        {
+                            lineNumber = i + 1,
+                            lineText = line.Trim(),
+                            isActive = !isCommented
+                        });
+                    }
+                }
+                debugLogsByScript[script] = logs;
+            }
+            // --- Конец анализа Debug.Log ---
 
             Debug.Log("Starting project analysis...");
             try
@@ -259,25 +354,20 @@ namespace ArchitectureVisualizer
                 DependencyAnalyzer.CollectDependencyData(selectedFolder, dependencyData);
                 // Обновляем UI вкладок
                 UpdateEventTracking();
+                // Обновляем Debug Logs UI
+                RefreshSelectedScriptsUI();
                 if (currentTabIndex >= 0 && currentTabIndex < tabView.childCount)
                 {
                     foreach (var tab in tabView.Children())
                     {
                         tab.RemoveFromClassList("unity-tab--selected");
                     }
-                    var tabToSelect = tabView.ElementAt(currentTabIndex) as Tab;
-                    if (tabToSelect != null)
-                    {
-                        tabToSelect.AddToClassList("unity-tab--selected");
-                        tabToSelect.MarkDirtyRepaint();
-                    }
+                    tabView.Children().ElementAt(currentTabIndex).AddToClassList("unity-tab--selected");
                 }
-                Debug.Log("Project analysis completed successfully.");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error during project analysis: {ex.Message}");
-                EditorUtility.DisplayDialog("Analysis Error", "An error occurred during project analysis. Check the console for details.", "OK");
+                Debug.LogError($"Error analyzing project: {ex.Message}");
             }
         }
 
