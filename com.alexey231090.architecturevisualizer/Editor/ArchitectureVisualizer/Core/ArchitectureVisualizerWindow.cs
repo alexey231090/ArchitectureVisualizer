@@ -135,27 +135,6 @@ namespace ArchitectureVisualizer
             tabView.style.marginLeft = 10;
             rootVisualElement.Add(tabView);
 
-            // Добавляем вкладку для таблиц (первая)
-            var tablesTab = new Tab("Tables");
-            tablesContainer = new ScrollView();
-            tablesContainer.style.flexGrow = 1;
-            tablesTab.SetContent(tablesContainer);
-            tabView.AddTab(tablesTab);
-
-            // Добавляем вкладку для структуры (вторая)
-            var structureTab = new Tab("Structure");
-            structureContainer = new ScrollView();
-            structureContainer.style.flexGrow = 1;
-            structureTab.SetContent(structureContainer);
-            tabView.AddTab(structureTab);
-
-            // Добавляем вкладку для деталей скриптов (третья)
-            var scriptDetailsTab = new Tab("Script Details");
-            scriptDetailsContainer = new ScrollView();
-            scriptDetailsContainer.style.flexGrow = 1;
-            scriptDetailsTab.SetContent(scriptDetailsContainer);
-            tabView.AddTab(scriptDetailsTab);
-
             // Добавляем новую вкладку для Event Tracking (четвертая)
             var eventTrackingTab = new Tab("Event Tracking");
             eventTrackingContainer = new ScrollView();
@@ -189,9 +168,6 @@ namespace ArchitectureVisualizer
                 dependencyData = new DependencyData();
                 DependencyAnalyzer.CollectDependencyData(selectedFolder, dependencyData);
                 // Обновляем UI вкладок
-                UpdateTables();
-                UpdateStructure();
-                UpdateScriptDetails();
                 UpdateEventTracking();
                 if (currentTabIndex >= 0 && currentTabIndex < tabView.childCount)
                 {
@@ -528,18 +504,17 @@ namespace ArchitectureVisualizer
 
         private void UpdateTables()
         {
-            tablesContainer.Clear();
-            TableBuilders.CreateEventsTable(tablesContainer, dependencyData);
-            TableBuilders.CreateHardDependenciesTable(tablesContainer, dependencyData);
-            TableBuilders.CreateDITable(tablesContainer, dependencyData);
-            TableBuilders.CreateScriptableObjectTable(tablesContainer, dependencyData);
-            TableBuilders.CreateSingletonTable(tablesContainer, dependencyData);
-            TableBuilders.CreateMessageBusTable(tablesContainer, dependencyData);
+            // TableBuilders.CreateEventsTable(tablesContainer, dependencyData);
+            // TableBuilders.CreateHardDependenciesTable(tablesContainer, dependencyData);
+            // TableBuilders.CreateDITable(tablesContainer, dependencyData);
+            // TableBuilders.CreateScriptableObjectTable(tablesContainer, dependencyData);
+            // TableBuilders.CreateSingletonTable(tablesContainer, dependencyData);
+            // TableBuilders.CreateMessageBusTable(tablesContainer, dependencyData);
         }
 
         private void UpdateStructure()
         {
-            StructureViewBuilder.UpdateStructure((ScrollView)structureContainer, selectedFolder);
+            // StructureViewBuilder.UpdateStructure((ScrollView)structureContainer, selectedFolder);
         }
 
         private void UpdateScriptDetails()
