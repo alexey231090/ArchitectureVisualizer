@@ -205,7 +205,14 @@ namespace ArchitectureVisualizer
                     var scriptPath = Directory.GetFiles(selectedFolder, scriptToAdd, SearchOption.AllDirectories).FirstOrDefault();
                     if (!string.IsNullOrEmpty(scriptPath) && File.Exists(scriptPath))
                     {
-                        var lines = File.ReadAllLines(scriptPath);
+                        var lines = File.ReadAllLines(scriptPath, Encoding.UTF8);
+                        // Если есть символ U+FFFD (белый ромб с вопросом), пробуем перекодировать из 1251
+                        if (lines.Any(l => l.Contains('\uFFFD')))
+                        {
+                            var bytes = File.ReadAllBytes(scriptPath);
+                            var text1251 = Encoding.GetEncoding(1251).GetString(bytes);
+                            lines = text1251.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+                        }
                         var logs = new List<DebugLogEntry>();
                         for (int i = 0; i < lines.Length; i++)
                         {
@@ -284,10 +291,73 @@ namespace ArchitectureVisualizer
                     {
                         var logRow = new VisualElement { style = { flexDirection = FlexDirection.Row, marginBottom = 2 } };
                         var check = new Toggle { value = log.isActive };
-                        check.SetEnabled(false); // Пока только просмотр, без изменения
-                        logRow.Add(check);
+                        check.RegisterValueChangedCallback(evt => {
+                            // Изменяем строку в файле
+                            var scriptPath = Directory.GetFiles(selectedFolder, script, SearchOption.AllDirectories).FirstOrDefault();
+                            if (!string.IsNullOrEmpty(scriptPath) && File.Exists(scriptPath))
+                            {
+                                var fileLines = File.ReadAllLines(scriptPath, Encoding.UTF8).ToList();
+                                // Перекодировка из 1251 если есть ромбики
+                                if (fileLines.Any(l => l.Contains('\uFFFD')))
+                                {
+                                    var bytes = File.ReadAllBytes(scriptPath);
+                                    var text1251 = Encoding.GetEncoding(1251).GetString(bytes);
+                                    fileLines = text1251.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None).ToList();
+                                }
+                                int idx = log.lineNumber - 1;
+                                if (idx >= 0 && idx < fileLines.Count)
+                                {
+                                    var line = fileLines[idx];
+                                    var trimmed = line.TrimStart();
+                                    bool isCommented = trimmed.StartsWith("//");
+                                    if (evt.newValue && isCommented)
+                                    {
+                                        // Включить: раскомментировать
+                                        int commentIdx = line.IndexOf("//");
+                                        if (commentIdx >= 0)
+                                            fileLines[idx] = line.Remove(commentIdx, 2);
+                                    }
+                                    else if (!evt.newValue && !isCommented)
+                                    {
+                                        // Отключить: закомментировать
+                                        int indent = line.Length - trimmed.Length;
+                                        fileLines[idx] = line.Insert(indent, "//");
+                                    }
+                                    // Сохраняем файл (в UTF-8)
+                                    File.WriteAllLines(scriptPath, fileLines, Encoding.UTF8);
+                                }
+                            }
+                            // Переанализировать и обновить UI
+                            var lines = File.ReadAllLines(scriptPath, Encoding.UTF8);
+                            if (lines.Any(l => l.Contains('\uFFFD')))
+                            {
+                                var bytes = File.ReadAllBytes(scriptPath);
+                                var text1251 = Encoding.GetEncoding(1251).GetString(bytes);
+                                lines = text1251.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+                            }
+                            var logsNew = new List<DebugLogEntry>();
+                            for (int i = 0; i < lines.Length; i++)
+                            {
+                                var l = lines[i];
+                                var trimmedL = l.TrimStart();
+                                bool isCommentedL = trimmedL.StartsWith("//");
+                                string checkLineL = isCommentedL ? trimmedL.Substring(2).TrimStart() : trimmedL;
+                                if (checkLineL.StartsWith("Debug.Log(") || checkLineL.StartsWith("Debug.LogWarning(") || checkLineL.StartsWith("Debug.LogError("))
+                                {
+                                    logsNew.Add(new DebugLogEntry
+                                    {
+                                        lineNumber = i + 1,
+                                        lineText = l.Trim(),
+                                        isActive = !isCommentedL
+                                    });
+                                }
+                            }
+                            debugLogsByScript[script] = logsNew;
+                            RefreshSelectedScriptsUI();
+                        });
                         var logLabel = new Label($"{log.lineText}    Line {log.lineNumber}");
                         if (debugLogFont != null) logLabel.style.unityFont = debugLogFont;
+                        logRow.Add(check);
                         logRow.Add(logLabel);
                         logsList.Add(logRow);
                     }
@@ -316,7 +386,14 @@ namespace ArchitectureVisualizer
                 var scriptPath = Directory.GetFiles(selectedFolder, script, SearchOption.AllDirectories).FirstOrDefault();
                 if (string.IsNullOrEmpty(scriptPath) || !File.Exists(scriptPath))
                     continue;
-                var lines = File.ReadAllLines(scriptPath);
+                var lines = File.ReadAllLines(scriptPath, Encoding.UTF8);
+                // Если есть символ U+FFFD (белый ромб с вопросом), пробуем перекодировать из 1251
+                if (lines.Any(l => l.Contains('\uFFFD')))
+                {
+                    var bytes = File.ReadAllBytes(scriptPath);
+                    var text1251 = Encoding.GetEncoding(1251).GetString(bytes);
+                    lines = text1251.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+                }
                 var logs = new List<DebugLogEntry>();
                 for (int i = 0; i < lines.Length; i++)
                 {
