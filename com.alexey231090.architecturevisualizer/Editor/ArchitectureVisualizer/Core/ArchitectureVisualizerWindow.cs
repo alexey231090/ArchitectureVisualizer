@@ -13,6 +13,7 @@ using System.Text.RegularExpressions;
 using System.Collections.Specialized;
 using ArchitectureVisualizer;
 using TMPro;
+using UnityEditor.UIElements;
 
 namespace ArchitectureVisualizer
 {
@@ -23,6 +24,7 @@ namespace ArchitectureVisualizer
         private ScrollView tablesContainer;
         private ScrollView scriptDetailsContainer;
         private ScrollView eventTrackingContainer;
+        private ScrollView debugLogsContainer;
         private DependencyData dependencyData = new DependencyData();
         private string selectedFolder = "Assets";
         private Label pathLabel;
@@ -41,6 +43,9 @@ namespace ArchitectureVisualizer
 
         private Dictionary<int, Label> _instanceLabels = new Dictionary<int, Label>();
         private string selectedScriptName;
+
+        // --- Debug Logs: динамический список выбранных скриптов ---
+        private List<string> selectedDebugScripts = new List<string>();
 
         private void OnEnable()
         {
@@ -141,6 +146,91 @@ namespace ArchitectureVisualizer
             eventTrackingContainer.style.flexGrow = 1;
             eventTrackingTab.SetContent(eventTrackingContainer);
             tabView.AddTab(eventTrackingTab);
+
+            // Добавляем новую вкладку для Debug Logs (пятая)
+            var debugLogsTab = new Tab("Debug Logs");
+            debugLogsContainer = new ScrollView();
+            debugLogsContainer.style.flexGrow = 1;
+
+            // --- UI для Debug Logs ---
+            var debugLogsPanel = new VisualElement();
+            debugLogsPanel.style.flexDirection = FlexDirection.Column;
+            debugLogsPanel.style.marginTop = 10;
+            debugLogsPanel.style.marginRight = 10;
+            debugLogsPanel.style.marginBottom = 10;
+            debugLogsPanel.style.marginLeft = 10;
+
+            // Label выбранной папки
+            var debugLogsPathLabel = new Label($"Current path: {selectedFolder}");
+            debugLogsPathLabel.style.marginBottom = 8;
+            debugLogsPanel.Add(debugLogsPathLabel);
+
+            // Список скриптов из выбранной папки
+            var scriptFiles = Directory.GetFiles(selectedFolder, "*.cs", SearchOption.AllDirectories)
+                .Select(Path.GetFileName)
+                .ToList();
+            var selectedDebugScript = scriptFiles.Count > 0 ? scriptFiles[0] : null;
+            var scriptDropdown = new PopupField<string>("Script", scriptFiles, 0);
+            scriptDropdown.label = "Script";
+            scriptDropdown.style.marginBottom = 8;
+            debugLogsPanel.Add(scriptDropdown);
+
+            // Контейнер для выбранных скриптов и их логов
+            var selectedScriptsContainer = new VisualElement();
+            selectedScriptsContainer.style.flexDirection = FlexDirection.Column;
+            selectedScriptsContainer.style.marginTop = 8;
+            debugLogsPanel.Add(selectedScriptsContainer);
+
+            // Кнопка "Добавить скрипт"
+            var addScriptButton = new Button(() => {
+                var scriptToAdd = scriptDropdown.value;
+                if (!string.IsNullOrEmpty(scriptToAdd) && !selectedDebugScripts.Contains(scriptToAdd))
+                {
+                    selectedDebugScripts.Add(scriptToAdd);
+                    RefreshSelectedScriptsUI();
+                }
+            }) { text = "Добавить" };
+            addScriptButton.style.marginBottom = 8;
+            debugLogsPanel.Add(addScriptButton);
+
+            // Метод для обновления UI выбранных скриптов
+            void RefreshSelectedScriptsUI()
+            {
+                selectedScriptsContainer.Clear();
+                foreach (var script in selectedDebugScripts)
+                {
+                    var scriptBlock = new VisualElement();
+                    scriptBlock.style.marginBottom = 10;
+                    scriptBlock.style.borderBottomWidth = 1;
+                    scriptBlock.style.borderBottomColor = new Color(0.7f, 0.7f, 0.7f);
+                    scriptBlock.style.paddingBottom = 4;
+
+                    var scriptHeader = new VisualElement { style = { flexDirection = FlexDirection.Row } };
+                    scriptHeader.Add(new Label(script) { style = { unityFontStyleAndWeight = FontStyle.Bold, marginRight = 8 } });
+                    var removeBtn = new Button(() => {
+                        selectedDebugScripts.Remove(script);
+                        RefreshSelectedScriptsUI();
+                    }) { text = "Удалить" };
+                    scriptHeader.Add(removeBtn);
+                    scriptBlock.Add(scriptHeader);
+
+                    // Заглушка для логов
+                    var logsList = new VisualElement();
+                    logsList.style.marginLeft = 16;
+                    logsList.Add(new Label("[☑] Debug.Log(\"Alex\");    Line 42"));
+                    logsList.Add(new Label("[ ] Debug.LogError(\"Error\"); Line 99"));
+                    scriptBlock.Add(logsList);
+
+                    selectedScriptsContainer.Add(scriptBlock);
+                }
+            }
+
+            // Первичная инициализация UI выбранных скриптов
+            RefreshSelectedScriptsUI();
+
+            debugLogsContainer.Add(debugLogsPanel);
+            debugLogsTab.SetContent(debugLogsContainer);
+            tabView.AddTab(debugLogsTab);
 
             Debug.Log($"Created {tabView.childCount} tabs");
             foreach (var tab in tabView.Children())
